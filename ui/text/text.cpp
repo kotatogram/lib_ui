@@ -117,19 +117,19 @@ bool ComputeCheckTilde(const style::TextStyle &st) {
 
 bool chIsBad(QChar ch) {
 	return (ch == 0)
-        || (ch >= 8232 && ch < 8237)
-        || (ch >= 65024 && ch < 65040 && ch != 65039)
-        || (ch >= 127 && ch < 160 && ch != 156)
+		|| (ch >= 8232 && ch < 8237)
+		|| (ch >= 65024 && ch < 65040 && ch != 65039)
+		|| (ch >= 127 && ch < 160 && ch != 156)
 
-        // qt harfbuzz crash see https://github.com/telegramdesktop/tdesktop/issues/4551
-        || (Platform::IsMac() && ch == 6158)
+		// qt harfbuzz crash see https://github.com/telegramdesktop/tdesktop/issues/4551
+		|| (Platform::IsMac() && ch == 6158)
 
-        // tmp hack see https://bugreports.qt.io/browse/QTBUG-48910
+		// tmp hack see https://bugreports.qt.io/browse/QTBUG-48910
 		|| (Platform::IsMac10_11OrGreater()
 			&& !Platform::IsMac10_12OrGreater()
 			&& ch >= 0x0B00
-            && ch <= 0x0B7F
-            && chIsDiac(ch));
+			&& ch <= 0x0B7F
+			&& chIsDiac(ch));
 }
 
 QString textcmdSkipBlock(ushort w, ushort h) {
@@ -1518,7 +1518,7 @@ private:
 		eShapeLine(line);
 
 		int firstItem = engine.findItem(line.from), lastItem = engine.findItem(line.from + line.length - 1);
-	    int nItems = (firstItem >= 0 && lastItem >= firstItem) ? (lastItem - firstItem + 1) : 0;
+		int nItems = (firstItem >= 0 && lastItem >= firstItem) ? (lastItem - firstItem + 1) : 0;
 		if (!nItems) {
 			return true;
 		}
@@ -1545,7 +1545,7 @@ private:
 				}
 			}
 		}
-	    QTextEngine::bidiReorder(nItems, levels.data(), visualOrder.data());
+		QTextEngine::bidiReorder(nItems, levels.data(), visualOrder.data());
 		if (style::RightToLeft() && skipIndex == nItems - 1) {
 			for (int32 i = nItems; i > 1;) {
 				--i;
@@ -1870,7 +1870,7 @@ private:
 		_wLeft = _w - elideWidth - _elideRemoveFromEnd;
 
 		int firstItem = engine.findItem(line.from), lastItem = engine.findItem(line.from + line.length - 1);
-	    int nItems = (firstItem >= 0 && lastItem >= firstItem) ? (lastItem - firstItem + 1) : 0, i;
+		int nItems = (firstItem >= 0 && lastItem >= firstItem) ? (lastItem - firstItem + 1) : 0, i;
 
 		for (i = 0; i < nItems; ++i) {
 			QScriptItem &si(engine.layoutData->items[firstItem + i]);
@@ -3214,6 +3214,17 @@ TextForMimeData String::toText(
 	if (composeExpanded) {
 		result.expanded.reserve(_text.size());
 	}
+	const auto insertEntity = [&](EntityInText &&entity) {
+		auto i = result.rich.entities.end();
+		while (i != result.rich.entities.begin()) {
+			auto j = i;
+			if ((--j)->offset() <= entity.offset()) {
+				break;
+			}
+			i = j;
+		}
+		result.rich.entities.insert(i, std::move(entity));
+	};
 	auto linkStart = 0;
 	auto markdownTrackers = composeEntities
 		? std::vector<MarkdownTagTracker>{
@@ -3231,7 +3242,7 @@ TextForMimeData String::toText(
 		for (auto &tracker : markdownTrackers) {
 			const auto flag = tracker.flag;
 			if ((oldFlags & flag) && !(newFlags & flag)) {
-				result.rich.entities.push_back({
+				insertEntity({
 					tracker.type,
 					tracker.start,
 					result.rich.text.size() - tracker.start });
@@ -3256,15 +3267,17 @@ TextForMimeData String::toText(
 		if (!composeExpanded && !composeEntities) {
 			return;
 		}
+		const auto skipLink = (entity.type == EntityType::CustomUrl)
+			&& (entity.data.startsWith(qstr("internal:")));
 		if (composeExpanded) {
 			result.expanded.append(full);
-			if (entity.type == EntityType::CustomUrl) {
+			if (entity.type == EntityType::CustomUrl && !skipLink) {
 				const auto &url = entity.data;
 				result.expanded.append(qstr(" (")).append(url).append(')');
 			}
 		}
-		if (composeEntities) {
-			result.rich.entities.push_back({
+		if (composeEntities && !skipLink) {
+			insertEntity({
 				entity.type,
 				linkStart,
 				full.size(),
