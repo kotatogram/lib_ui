@@ -32,11 +32,6 @@ public:
 	Font(int size, uint32 flags, const QString &family);
 	Font(int size, uint32 flags, int family);
 
-	Font &operator=(const Font &other) {
-		ptr = other.ptr;
-		return (*this);
-	}
-
 	FontData *operator->() const {
 		return ptr;
 	}
