@@ -56,8 +56,8 @@ bool IsRealSemibold(const QString &familyName) {
 	QFontInfo withoutSemiboldInfo(withoutSemiboldFont);
 
 	if (originalFontInfo.family().trimmed().compare(familyName, Qt::CaseInsensitive) &&
-	!withoutSemiboldInfo.family().trimmed().compare(removedSemibold, Qt::CaseInsensitive) &&
-	!withoutSemiboldInfo.styleName().trimmed().compare("Semibold", Qt::CaseInsensitive)) {
+		!withoutSemiboldInfo.family().trimmed().compare(removedSemibold, Qt::CaseInsensitive) &&
+		!withoutSemiboldInfo.styleName().trimmed().compare("Semibold", Qt::CaseInsensitive)) {
 		return true;
 	} else {
 		return false;
