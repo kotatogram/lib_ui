@@ -297,8 +297,7 @@ int registerFontFamily(const QString &family) {
 }
 
 FontData::FontData(int size, uint32 flags, int family, Font *other)
-: f()
-, m(f)
+: m(f)
 , _size(size)
 , _flags(flags)
 , _family(family) {
