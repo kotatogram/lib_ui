@@ -43,8 +43,8 @@ void InitOnTopPanel(not_null<QWidget*> panel) {
 	auto platformPanel = static_cast<NSPanel*>(platformWindow);
 	[platformPanel setLevel:NSPopUpMenuWindowLevel];
 	[platformPanel setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces|NSWindowCollectionBehaviorStationary|NSWindowCollectionBehaviorFullScreenAuxiliary|NSWindowCollectionBehaviorIgnoresCycle];
-	[platformPanel setFloatingPanel:YES];
 	[platformPanel setHidesOnDeactivate:NO];
+	//[platformPanel setFloatingPanel:YES];
 
 	Integration::Instance().activationFromTopPanel();
 }
@@ -67,12 +67,12 @@ void ReInitOnTopPanel(not_null<QWidget*> panel) {
 	[platformPanel setCollectionBehavior:newBehavior];
 }
 
-void StartTranslucentPaint(QPainter &p, QPaintEvent *e) {
-#ifdef OS_MAC_OLD
+void StartTranslucentPaint(QPainter &p, gsl::span<const QRect> rects) {
 	p.setCompositionMode(QPainter::CompositionMode_Source);
-	p.fillRect(e->rect(), Qt::transparent);
+	for (const auto &r : rects) {
+		p.fillRect(r, Qt::transparent);
+	}
 	p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-#endif // OS_MAC_OLD
 }
 
 void ShowOverAll(not_null<QWidget*> widget, bool canFocus) {
