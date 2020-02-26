@@ -76,7 +76,7 @@ public:
 	}
 	void setFont(const style::font &font) {
 		_ascent = font->ascent;
-		QPainter::setFont(font);
+		QPainter::setFont(font->f);
 	}
 
 private:
