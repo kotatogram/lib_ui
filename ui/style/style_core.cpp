@@ -20,7 +20,7 @@
 namespace style {
 namespace internal {
 
-bool GetUseSystemFont();
+extern bool UseSystemFont;
 
 namespace {
 
@@ -32,7 +32,6 @@ auto PaletteChanges = rpl::event_stream<>();
 auto ShortAnimationRunning = rpl::variable<bool>(false);
 auto RunningShortAnimations = 0;
 auto ResolvedMonospaceFont = style::font();
-QString CustomMonospaceFont;
 
 std::vector<internal::ModuleBase*> &StyleModules() {
 	static auto result = std::vector<internal::ModuleBase*>();
@@ -58,7 +57,7 @@ void ResolveMonospaceFont() {
 	if (!CustomMonospaceFont.isEmpty()) {
 		tryFont(CustomMonospaceFont);
 	}
-	if (!GetUseSystemFont()) {
+	if (!UseSystemFont) {
 		tryFont("Consolas");
 		tryFont("Liberation Mono");
 		tryFont("Menlo");
@@ -74,9 +73,7 @@ void ResolveMonospaceFont() {
 
 } // namespace
 
-void SetMonospaceFont(const QString &familyName) {
-	CustomMonospaceFont = familyName;
-}
+QString CustomMonospaceFont;
 
 void registerModule(ModuleBase *module) {
 	StyleModules().push_back(module);

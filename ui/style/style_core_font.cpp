@@ -167,37 +167,13 @@ QString FontTypeWindowsFallback[FontTypesCount] = {
 bool Started = false;
 QString Overrides[FontTypesCount];
 
+} // namespace
+
 QString CustomMainFont;
 QString CustomSemiboldFont;
 bool CustomSemiboldIsBold = false;
 bool UseSystemFont = false;
 bool UseOriginalMetrics = false;
-
-} // namespace
-
-bool GetUseSystemFont() {
-	return UseSystemFont;
-}
-
-void SetMainFont(const QString &familyName) {
-	CustomMainFont = familyName;
-}
-
-void SetSemiboldFont(const QString &familyName) {
-	CustomSemiboldFont = familyName;
-}
-
-void SetSemiboldIsBold(bool isBold) {
-	CustomSemiboldIsBold = isBold;
-}
-
-void SetUseSystemFont(bool isSystemFont) {
-	UseSystemFont = isSystemFont;
-}
-
-void SetUseOriginalMetrics(bool isOriginal) {
-	UseOriginalMetrics = isOriginal;
-}
 
 void StartFonts() {
 	if (Started) {
