@@ -15,6 +15,8 @@
 namespace style {
 namespace internal {
 
+extern QString CustomMonospaceFont;
+
 // Objects of derived classes are created in global scope.
 // They call [un]registerModule() in [de|con]structor.
 class ModuleBase {
@@ -24,8 +26,6 @@ public:
 	virtual ~ModuleBase() = default;
 
 };
-
-void SetMonospaceFont(const QString &familyName);
 
 void registerModule(ModuleBase *module);
 

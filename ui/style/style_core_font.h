@@ -14,11 +14,11 @@
 namespace style {
 namespace internal {
 
-void SetMainFont(const QString &familyName);
-void SetSemiboldFont(const QString &familyName);
-void SetSemiboldIsBold(bool isBold);
-void SetUseSystemFont(bool isSystemFont);
-void SetUseOriginalMetrics(bool isOriginal);
+extern QString CustomMainFont;
+extern QString CustomSemiboldFont;
+extern bool CustomSemiboldIsBold;
+extern bool UseSystemFont;
+extern bool UseOriginalMetrics;
 
 void StartFonts();
 [[nodiscard]] QString GetFontOverride(const QString &familyName, int32 flags = 0);
