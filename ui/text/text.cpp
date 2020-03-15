@@ -2027,13 +2027,9 @@ private:
 					result = style::font(f->size(), f->flags(), result->family());
 				}
 			}
-		}
-
-		if (flags & TextBlockFItalic) result = result->italic();
-		if (flags & TextBlockFUnderline) result = result->underline();
-		if (flags & TextBlockFStrikeOut) result = result->strikeout();
-
-		if (flags & TextBlockFSemibold) {
+			if (flags & TextBlockFItalic) result = result->italic();
+			if (flags & TextBlockFUnderline) result = result->underline();
+			if (flags & TextBlockFStrikeOut) result = result->strikeout();
 			if (flags & TextBlockFTilde) { // tilde fix in OpenSans
 				result = st::semiboldFont;
 			}
