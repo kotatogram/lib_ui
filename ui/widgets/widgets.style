@@ -544,6 +544,30 @@ WindowTitle {
 	closeIconActiveOver: icon;
 }
 
+SideBarButton {
+	icon: icon;
+	iconActive: icon;
+	iconPosition: point;
+	textTop: pixels;
+	textSkip: pixels;
+	minTextWidth: pixels;
+	minHeight: pixels;
+	style: TextStyle;
+	badgeStyle: TextStyle;
+	badgeSkip: pixels;
+	badgeHeight: pixels;
+	badgeStroke: pixels;
+	badgePosition: point;
+	textBg: color;
+	textBgActive: color;
+	textFg: color;
+	textFgActive: color;
+	badgeBg: color;
+	badgeBgMuted: color;
+	badgeFg: color;
+	ripple: RippleAnimation;
+}
+
 defaultLabelSimple: LabelSimple {
 	font: normalFont;
 	maxWidth: 0px;
@@ -884,6 +908,26 @@ defaultRoundCheckbox: RoundCheckbox {
 	bgDuration: 0.75;
 	fgDuration: 1.;
 }
+defaultPeerListCheckIcon: icon {{
+	"default_checkbox_check",
+	overviewCheckFgActive,
+	point(3px, 6px)
+}};
+defaultPeerListCheck: RoundCheckbox(defaultRoundCheckbox) {
+	size: 20px;
+	sizeSmall: 0.3;
+	bgInactive: overviewCheckBg;
+	bgActive: overviewCheckBgActive;
+	check: defaultPeerListCheckIcon;
+}
+defaultPeerListCheckbox: RoundImageCheckbox {
+	imageRadius: 21px;
+	imageSmallRadius: 18px;
+	selectWidth: 2px;
+	selectFg: windowBgActive;
+	selectDuration: 150;
+	check: defaultPeerListCheck;
+}
 
 defaultMenuArrow: icon {{ "dropdown_submenu_arrow", menuSubmenuArrowFg }};
 defaultMenuToggle: Toggle(defaultToggle) {
@@ -1061,6 +1105,7 @@ PeerListItem {
 	maximalWidth: pixels;
 
 	button: OutlineButton;
+	checkbox: RoundImageCheckbox;
 	statusFg: color;
 	statusFgOver: color;
 	statusFgActive: color;
@@ -1096,6 +1141,7 @@ defaultPeerListItem: PeerListItem {
 	statusPosition: point(68px, 31px);
 	photoSize: 46px;
 	button: defaultPeerListButton;
+	checkbox: defaultPeerListCheckbox;
 	statusFg: windowSubTextFg;
 	statusFgOver: windowSubTextFgOver;
 	statusFgActive: windowActiveTextFg;
@@ -1205,6 +1251,19 @@ defaultSettingsButton: SettingsButton {
 	toggleSkip: 23px;
 
 	ripple: defaultRippleAnimation;
+}
+
+defaultSideBarButton: SideBarButton {
+	textBg: sideBarBg;
+	textBgActive: sideBarBgActive;
+	textFg: sideBarTextFg;
+	textFgActive: sideBarTextFgActive;
+	badgeBg: sideBarBadgeBg;
+	badgeBgMuted: sideBarBadgeBgMuted;
+	badgeFg: sideBarBadgeFg;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: sideBarBgRipple;
+	}
 }
 
 // Windows specific title

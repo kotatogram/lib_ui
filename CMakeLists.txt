@@ -135,6 +135,8 @@ PRIVATE
     ui/widgets/popup_menu.h
     ui/widgets/scroll_area.cpp
     ui/widgets/scroll_area.h
+    ui/widgets/side_bar_button.cpp
+    ui/widgets/side_bar_button.h
     ui/widgets/shadow.cpp
     ui/widgets/shadow.h
     ui/widgets/tooltip.cpp
@@ -149,6 +151,8 @@ PRIVATE
     ui/wrap/slide_wrap.h
     ui/wrap/vertical_layout.cpp
     ui/wrap/vertical_layout.h
+    ui/wrap/vertical_layout_reorder.cpp
+    ui/wrap/vertical_layout_reorder.h
     ui/wrap/wrap.h
     ui/abstract_button.cpp
     ui/abstract_button.h
