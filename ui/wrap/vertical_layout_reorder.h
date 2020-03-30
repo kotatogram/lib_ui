@@ -7,6 +7,7 @@
 #pragma once
 
 #include "ui/effects/animations.h"
+#include "ui/widgets/scroll_area.h"
 
 namespace Ui {
 
@@ -27,10 +28,13 @@ public:
 		State state = State::Started;
 	};
 
-	VerticalLayoutReorder(not_null<VerticalLayout*> layout);
+	VerticalLayoutReorder(
+		not_null<VerticalLayout*> layout,
+		not_null<ScrollArea*> scroll);
 
 	void start();
 	void cancel();
+	void finishReordering();
 	[[nodiscard]] rpl::producer<Single> updates() const;
 
 private:
@@ -47,7 +51,7 @@ private:
 		not_null<RpWidget*> widget,
 		Qt::MouseButton button,
 		QPoint position);
-	void mouseRelease(not_null<RpWidget*> widget, Qt::MouseButton button);
+	void mouseRelease(Qt::MouseButton button);
 
 	void checkForStart(QPoint position);
 	void updateOrder(int index, QPoint position);
@@ -59,7 +63,14 @@ private:
 	void moveToShift(int index, int shift);
 	void updateShift(not_null<RpWidget*> widget, int indexHint);
 
+	void updateScrollCallback();
+	void checkForScrollAnimation();
+	int deltaFromEdge();
+
 	const not_null<Ui::VerticalLayout*> _layout;
+	const not_null<Ui::ScrollArea*> _scroll;
+
+	Ui::Animations::Basic _scrollAnimation;
 
 	RpWidget *_currentWidget = nullptr;
 	int _currentStart = 0;

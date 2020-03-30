@@ -6,8 +6,9 @@
 //
 #include "ui/style/style_core_font.h"
 
-#include "base/algorithm.h"
 #include "ui/ui_log.h"
+#include "base/algorithm.h"
+#include "ui/integration.h"
 
 #include <QtCore/QMap>
 #include <QtCore/QVector>
@@ -183,6 +184,11 @@ void StartFonts() {
 
 	style_InitFontsResource();
 
+	const auto integrationExists = Ui::Integration::Exists();
+	if (integrationExists) {
+		Ui::Integration::Instance().startFontsBegin();
+	}
+
 	if (!UseSystemFont) {
 #ifndef DESKTOP_APP_USE_PACKAGED_FONTS
 		bool areGood[FontTypesCount] = { false };
@@ -231,6 +237,10 @@ void StartFonts() {
 	if (!CustomSemiboldFont.isEmpty() && ValidateFont(CustomSemiboldFont)) {
 		Overrides[FontTypeSemibold] = CustomSemiboldFont;
 		Overrides[FontTypeSemiboldItalic] = CustomSemiboldFont;
+	}
+
+	if (integrationExists) {
+		Ui::Integration::Instance().startFontsEnd();
 	}
 }
 
