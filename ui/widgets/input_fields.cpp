@@ -654,14 +654,6 @@ void RemoveDocumentTags(
 	cursor.mergeCharFormat(format);
 }
 
-style::font AdjustFont(
-		const style::font &font,
-		const style::font &original) {
-	return (font->size() != original->size())
-		? style::font(original->size(), font->flags(), font->family())
-		: font;
-}
-
 bool IsValidMarkdownLink(const QString &link) {
 	return (link.indexOf('.') >= 0) || (link.indexOf(':') >= 0);
 }
@@ -674,16 +666,8 @@ QTextCharFormat PrepareTagFormat(
 		result.setForeground(st::defaultTextPalette.linkFg);
 		result.setFont(st.font);
 	} else if (tag == kTagBold) {
-		auto semibold = st::semiboldFont;
-		if (semibold->size() != st.font->size()
-			|| semibold->flags() != st.font->flags()) {
-			semibold = style::font(
-				st.font->size(),
-				st.font->flags(),
-				semibold->family());
-		}
 		result.setForeground(st.textFg);
-		result.setFont(AdjustFont(st::semiboldFont, st.font));
+		result.setFont(st.font->semibold());
 	} else if (tag == kTagItalic) {
 		result.setForeground(st.textFg);
 		result.setFont(st.font->italic());
@@ -695,7 +679,7 @@ QTextCharFormat PrepareTagFormat(
 		result.setFont(st.font->strikeout());
 	} else if (tag == kTagCode || tag == kTagPre) {
 		result.setForeground(st::defaultTextPalette.monoFg);
-		result.setFont(AdjustFont(style::MonospaceFont(), st.font));
+		result.setFont(st.font->monospace());
 	} else {
 		result.setForeground(st.textFg);
 		result.setFont(st.font);
@@ -1997,7 +1981,7 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 	const auto tildeFormatting = (_st.font->f.pixelSize() * style::DevicePixelRatio() == 13)
 		&& (_st.font->f.family() == qstr("DAOpenSansRegular"));
 	auto isTildeFragment = false;
-	const auto tildeFixedFont = AdjustFont(st::semiboldFont, _st.font);
+	const auto tildeFixedFont = _st.font->semibold();
 
 	// First tag handling (the one we inserted text to).
 	bool startTagFound = false;

@@ -12,16 +12,12 @@
 #include "styles/palette.h"
 
 #include <QtGui/QPainter>
-#include <QtGui/QFontDatabase>
 
 #include <rpl/event_stream.h>
 #include <rpl/variable.h>
 
 namespace style {
 namespace internal {
-
-extern bool UseSystemFont;
-
 namespace {
 
 constexpr auto kMinContrastAlpha = 64;
@@ -31,7 +27,6 @@ constexpr auto kContrastDeltaL = 64;
 auto PaletteChanges = rpl::event_stream<>();
 auto ShortAnimationRunning = rpl::variable<bool>(false);
 auto RunningShortAnimations = 0;
-auto ResolvedMonospaceFont = style::font();
 
 std::vector<internal::ModuleBase*> &StyleModules() {
 	static auto result = std::vector<internal::ModuleBase*>();
@@ -44,36 +39,7 @@ void startModules(int scale) {
 	}
 }
 
-void ResolveMonospaceFont() {
-	auto family = QString();
-	const auto tryFont = [&](const QString &attempt) {
-		if (family.isEmpty()
-			&& !QFontInfo(QFont(attempt)).family().trimmed().compare(
-				attempt,
-				Qt::CaseInsensitive)) {
-			family = attempt;
-		}
-	};
-	if (!CustomMonospaceFont.isEmpty()) {
-		tryFont(CustomMonospaceFont);
-	}
-	if (!UseSystemFont) {
-		tryFont("Consolas");
-		tryFont("Liberation Mono");
-		tryFont("Menlo");
-		tryFont("Courier");
-	}
-	if (family.isEmpty()) {
-		const auto type = QFontDatabase::FixedFont;
-		family = QFontDatabase::systemFont(type).family();
-	}
-	const auto size = st::normalFont->f.pixelSize();
-	ResolvedMonospaceFont = style::font(size, 0, family)->monospace();
-}
-
 } // namespace
-
-QString CustomMonospaceFont;
 
 void registerModule(ModuleBase *module) {
 	StyleModules().push_back(module);
@@ -96,7 +62,6 @@ void StopShortAnimation() {
 void startManager(int scale) {
 	internal::registerFontFamily("Open Sans");
 	internal::startModules(scale);
-	internal::ResolveMonospaceFont();
 }
 
 void stopManager() {
@@ -114,10 +79,6 @@ void NotifyPaletteChanged() {
 
 rpl::producer<bool> ShortAnimationPlaying() {
 	return internal::ShortAnimationRunning.value();
-}
-
-const style::font &MonospaceFont() {
-	return internal::ResolvedMonospaceFont;
 }
 
 void colorizeImage(const QImage &src, QColor c, QImage *outResult, QRect srcRect, QPoint dstPoint) {

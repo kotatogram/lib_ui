@@ -23,8 +23,6 @@ TextStyle {
 	lineHeight: pixels;
 }
 
-semibold: "Open Sans Semibold";
-
 fsize: 13px;
 normalFont: font(fsize);
 semiboldFont: font(fsize semibold);
@@ -271,6 +269,10 @@ inlineResultsMinWidth: 48px;
 inlineDurationMargin: 3px;
 
 toastTextStyle: defaultTextStyle;
+toastTextPalette: TextPalette(defaultTextPalette) {
+	linkFg: mediaviewTextLinkFg;
+	monoFg: mediaviewCaptionFg;
+}
 toastMaxWidth: 480px;
 toastMinMargin: 13px;
 toastPadding: margins(19px, 13px, 19px, 12px);

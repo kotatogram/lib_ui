@@ -27,6 +27,11 @@ public:
 protected:
 	void paintEvent(QPaintEvent *e) override;
 
+	void leaveEventHook(QEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+
 private:
 	int widthWithoutPadding(int w) {
 		return w - _padding.left() - _padding.right();
@@ -36,6 +41,7 @@ private:
 
 	float64 _shownLevel = 0;
 	bool _multiline = false;
+	bool _dark = false;
 	int _maxWidth = 0;
 	QMargins _padding;
 
@@ -43,6 +49,8 @@ private:
 	int _maxTextHeight = 0;
 	int _textWidth = 0;
 	Text::String _text;
+
+	ClickHandlerFilter _clickHandlerFilter;
 
 };
 
