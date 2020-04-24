@@ -159,6 +159,16 @@ QString MonospaceFont() {
 	return family;
 }
 
+QFontMetrics GetFontMetrics(int size) {
+#ifdef DESKTOP_APP_USE_PACKAGED_FONTS
+	QFont originalFont("Open Sans");
+#else // !DESKTOP_APP_USE_PACKAGED_FONTS
+	QFont originalFont("DAOpenSansRegular");
+#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+	originalFont.setPixelSize(size);
+	return QFontMetrics(originalFont);
+}
+
 enum {
 	FontTypeRegular = 0,
 	FontTypeRegularItalic,
@@ -385,10 +395,8 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 
 	m = QFontMetrics(f);
 
-	if (UseOriginalMetrics) {
-		QFont originalFont(fontFamilies[family]);
-		originalFont.setPixelSize(size);
-		auto mOrig = QFontMetrics(originalFont);
+	if (UseOriginalMetrics && !(_flags & FontMonospace)) {
+		const auto mOrig = GetFontMetrics(size);
 
 		height = mOrig.height();
 		ascent = mOrig.ascent();
