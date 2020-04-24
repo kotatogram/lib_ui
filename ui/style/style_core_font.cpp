@@ -130,7 +130,7 @@ QString MonospaceFont() {
 		const auto tryFont = [&](const QString &attempt) {
 			const auto resolved = QFontInfo(QFont(attempt)).family();
 			return !resolved.trimmed().compare(attempt, Qt::CaseInsensitive);
-		}
+		};
 
 		if (tryFont(CustomMonospaceFont)) {
 			return CustomMonospaceFont;
@@ -371,6 +371,12 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 		f.setFamily(fontOverride);
 	}
 
+	f.setPixelSize(size);
+	f.setBold(_flags & FontBold);
+	f.setItalic(_flags & FontItalic);
+	f.setUnderline(_flags & FontUnderline);
+	f.setStrikeOut(_flags & FontStrikeOut);
+
 	if (_flags & FontSemibold) {
 		if (CustomSemiboldIsBold) {
 			f.setBold(true);
@@ -382,12 +388,6 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 			f.setWeight(QFont::DemiBold);
 		}
 	}
-
-	f.setPixelSize(size);
-	f.setBold(_flags & FontBold);
-	f.setItalic(_flags & FontItalic);
-	f.setUnderline(_flags & FontUnderline);
-	f.setStrikeOut(_flags & FontStrikeOut);
 
 	if (IsRealSemibold(fontOverride)) {
 		f.setStyleName("Semibold");
