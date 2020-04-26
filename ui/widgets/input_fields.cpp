@@ -1306,6 +1306,12 @@ InputField::InputField(
 	_inner->viewport()->setAutoFillBackground(false);
 
 	_inner->setContentsMargins(0, 0, 0, 0);
+	if (style::internal::UseOriginalMetrics) {
+		const auto heightDelta = (_st.font->height - _st.font->m.height());
+		const auto topMargin = (_st.font->ascent - _st.font->m.ascent())
+			+ (heightDelta ? heightDelta / 2 : 0);
+		_inner->setViewportMargins(0, topMargin, 0, 0);
+	}
 	_inner->document()->setDocumentMargin(0);
 
 	setAttribute(Qt::WA_AcceptTouchEvents);
@@ -1715,6 +1721,16 @@ void InputField::paintEvent(QPaintEvent *e) {
 				auto r = rect().marginsRemoved(_st.textMargins + _st.placeholderMargins);
 				r.moveLeft(r.left() + placeholderLeft);
 				if (style::RightToLeft()) r.moveLeft(width() - r.left() - r.width());
+				if (style::internal::UseOriginalMetrics) {
+					if (_mode == Mode::SingleLine) {
+						const auto heightDelta = (_st.placeholderFont->height - _st.placeholderFont->m.height());
+						const auto topMargin = (_st.placeholderFont->ascent - _st.placeholderFont->m.ascent())
+							+ (heightDelta ? heightDelta / 2 : 0);
+						r.moveTop(r.top() + topMargin);
+					} else {
+						r.moveTop(r.top() + _st.placeholderFont->ascent - _st.placeholderFont->m.ascent());
+					}
+				}
 				p.drawText(r, _placeholder, _st.placeholderAlign);
 			}
 
