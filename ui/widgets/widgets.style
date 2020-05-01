@@ -568,6 +568,20 @@ SideBarButton {
 	ripple: RippleAnimation;
 }
 
+Toast {
+	style: TextStyle;
+	icon: icon;
+	iconPosition: point;
+	palette: TextPalette;
+	padding: margins;
+	margin: margins;
+	minWidth: pixels;
+	maxWidth: pixels;
+	durationFadeIn: int;
+	durationFadeOut: int;
+	durationSlide: int;
+}
+
 defaultLabelSimple: LabelSimple {
 	font: normalFont;
 	maxWidth: 0px;
@@ -1248,7 +1262,7 @@ defaultSettingsButton: SettingsButton {
 
 	toggle: defaultSettingsToggle;
 	toggleOver: defaultSettingsToggleOver;
-	toggleSkip: 23px;
+	toggleSkip: 22px;
 
 	ripple: defaultRippleAnimation;
 }
@@ -1264,6 +1278,20 @@ defaultSideBarButton: SideBarButton {
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: sideBarBgRipple;
 	}
+}
+
+defaultToast: Toast {
+	style: defaultTextStyle;
+	palette: TextPalette(defaultTextPalette) {
+		linkFg: mediaviewTextLinkFg;
+		monoFg: mediaviewCaptionFg;
+	}
+	padding: margins(19px, 13px, 19px, 12px);
+	margin: margins(13px, 13px, 13px, 13px);
+	maxWidth: 480px;
+	durationFadeIn: 200;
+	durationFadeOut: 1000;
+	durationSlide: 160;
 }
 
 // Windows specific title

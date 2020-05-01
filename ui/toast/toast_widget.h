@@ -15,7 +15,7 @@ namespace Ui {
 namespace Toast {
 namespace internal {
 
-class Widget : public TWidget {
+class Widget final : public RpWidget {
 public:
 	Widget(QWidget *parent, const Config &config);
 
@@ -33,21 +33,22 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 
 private:
-	int widthWithoutPadding(int w) {
-		return w - _padding.left() - _padding.right();
-	}
+	[[nodiscard]] int widthWithoutPadding(int w) const;
+	void updateGeometry();
 
+	const not_null<const style::Toast*> _st;
 	RoundRect _roundRect;
+	RectPart _slideSide = RectPart::None;
 
 	float64 _shownLevel = 0;
 	bool _multiline = false;
 	bool _dark = false;
-	int _maxWidth = 0;
-	QMargins _padding;
 
 	int _maxTextWidth = 0;
 	int _maxTextHeight = 0;
 	int _textWidth = 0;
+	int _textHeight = 0;
+	int _textTop = 0;
 	Text::String _text;
 
 	ClickHandlerFilter _clickHandlerFilter;

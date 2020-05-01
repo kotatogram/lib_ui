@@ -8,6 +8,7 @@
 
 #include "ui/image/image_prepare.h"
 #include "styles/palette.h"
+#include "styles/style_widgets.h"
 
 #include <QtGui/QtEvents>
 
@@ -16,16 +17,16 @@ namespace Toast {
 namespace internal {
 
 Widget::Widget(QWidget *parent, const Config &config)
-: TWidget(parent)
+: RpWidget(parent)
+, _st(config.st)
 , _roundRect(ImageRoundRadius::Large, st::toastBg)
+, _slideSide(config.slideSide)
 , _multiline(config.multiline)
 , _dark(config.dark)
-, _maxWidth((config.maxWidth > 0) ? config.maxWidth : st::toastMaxWidth)
-, _padding((config.padding.left() > 0) ? config.padding : st::toastPadding)
-, _maxTextWidth(widthWithoutPadding(_maxWidth))
+, _maxTextWidth(widthWithoutPadding(_st->maxWidth))
 , _maxTextHeight(
-	st::toastTextStyle.font->height * (_multiline ? config.maxLines : 1))
-, _text(_multiline ? widthWithoutPadding(config.minWidth) : QFIXED_MAX)
+	config.st->style.font->height * (_multiline ? config.maxLines : 1))
+, _text(_multiline ? widthWithoutPadding(config.st->minWidth) : QFIXED_MAX)
 , _clickHandlerFilter(config.filter) {
 	const auto toastOptions = TextParseOptions{
 		TextParseMultiline,
@@ -34,7 +35,7 @@ Widget::Widget(QWidget *parent, const Config &config)
 		Qt::LayoutDirectionAuto
 	};
 	_text.setMarkedText(
-		st::toastTextStyle,
+		_st->style,
 		_multiline ? config.text : TextUtilities::SingleLine(config.text),
 		toastOptions);
 
@@ -49,36 +50,102 @@ Widget::Widget(QWidget *parent, const Config &config)
 }
 
 void Widget::onParentResized() {
-	auto newWidth = _maxWidth;
-	accumulate_min(newWidth, _padding.left() + _text.maxWidth() + _padding.right());
-	accumulate_min(newWidth, parentWidget()->width() - 2 * st::toastMinMargin);
-	_textWidth = widthWithoutPadding(newWidth);
-	const auto textHeight = _multiline
+	updateGeometry();
+}
+
+void Widget::updateGeometry() {
+	auto width = _st->maxWidth;
+	accumulate_min(
+		width,
+		_st->padding.left() + _text.maxWidth() + _st->padding.right());
+	accumulate_min(
+		width,
+		parentWidget()->width() - _st->margin.left() - _st->margin.right());
+	_textWidth = widthWithoutPadding(width);
+	_textHeight = _multiline
 		? qMin(_text.countHeight(_textWidth), _maxTextHeight)
 		: _text.minHeight();
-	const auto newHeight = _padding.top() + textHeight + _padding.bottom();
-	setGeometry((parentWidget()->width() - newWidth) / 2, (parentWidget()->height() - newHeight) / 2, newWidth, newHeight);
+	const auto minHeight = _st->icon.empty()
+		? 0
+		: (_st->icon.height() + 2 * _st->iconPosition.y());
+	const auto normalHeight = _st->padding.top()
+		+ _textHeight
+		+ _st->padding.bottom();
+	const auto height = std::max(minHeight, normalHeight);
+	_textTop = _st->padding.top() + ((height - normalHeight) / 2);
+	const auto rect = QRect(0, 0, width, height);
+	const auto outer = parentWidget()->size();
+	const auto full = QPoint(outer.width(), outer.height());
+	const auto middle = QPoint(
+		(outer.width() - width) / 2,
+		(outer.height() - height) / 2);
+	const auto interpolated = [&](int from, int to) {
+		return anim::interpolate(from, to, _shownLevel);
+	};
+	setGeometry(rect.translated([&] {
+		switch (_slideSide) {
+		case RectPart::None:
+			return middle;
+		case RectPart::Left:
+			return QPoint(
+				interpolated(-width, _st->margin.left()),
+				middle.y());
+		case RectPart::Top:
+			return QPoint(
+				middle.x(),
+				interpolated(-height, _st->margin.top()));
+		case RectPart::Right:
+			return QPoint(
+				full.x() - interpolated(0, width + _st->margin.right()),
+				middle.y());
+		case RectPart::Bottom:
+			return QPoint(
+				middle.x(),
+				full.y() - interpolated(0, height + _st->margin.bottom()));
+		}
+		Unexpected("Slide side in Toast::Widget::updateGeometry.");
+	}()));
 }
 
 void Widget::setShownLevel(float64 shownLevel) {
 	_shownLevel = shownLevel;
+	if (_slideSide != RectPart::None) {
+		updateGeometry();
+	} else {
+		update();
+	}
 }
 
 void Widget::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 	PainterHighQualityEnabler hq(p);
 
-	p.setOpacity(_shownLevel);
+	if (_slideSide == RectPart::None) {
+		p.setOpacity(_shownLevel);
+	}
 	_roundRect.paint(p, rect());
 	if (_dark) {
 		_roundRect.paint(p, rect());
 	}
 
-	p.setTextPalette(st::toastTextPalette);
+	if (!_st->icon.empty()) {
+		_st->icon.paint(
+			p,
+			_st->iconPosition.x(),
+			_st->iconPosition.y(),
+			width());
+	}
 
-	const auto lines = _maxTextHeight / st::toastTextStyle.font->height;
+	p.setTextPalette(_st->palette);
+
+	const auto lines = _maxTextHeight / _st->style.font->height;
 	p.setPen(st::toastFg);
-	_text.drawElided(p, _padding.left(), _padding.top(), _textWidth + 1, lines);
+	_text.drawElided(
+		p,
+		_st->padding.left(),
+		_textTop,
+		_textWidth + 1,
+		lines);
 }
 
 void Widget::leaveEventHook(QEvent *e) {
@@ -96,8 +163,9 @@ void Widget::mouseMoveEvent(QMouseEvent *e) {
 	if (!_text.hasLinks()) {
 		return;
 	}
-	const auto point = e->pos() - QPoint(_padding.left(), _padding.top());
-	const auto lines = _maxTextHeight / st::toastTextStyle.font->height;
+	const auto point = e->pos()
+		- QPoint(_st->padding.left(), _textTop);
+	const auto lines = _maxTextHeight / _st->style.font->height;
 	const auto state = _text.getStateElided(point, _textWidth + 1);
 	const auto was = ClickHandler::getActive();
 	if (was != state.link) {
@@ -127,6 +195,10 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			ActivateClickHandler(this, handler, button);
 		}
 	}
+}
+
+int Widget::widthWithoutPadding(int w) const {
+	return w - _st->padding.left() - _st->padding.right();
 }
 
 } // namespace internal
