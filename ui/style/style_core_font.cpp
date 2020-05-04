@@ -233,8 +233,8 @@ void StartFonts() {
 		Ui::Integration::Instance().startFontsBegin();
 	}
 
-	if (!UseSystemFont) {
 #ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+	if (!UseSystemFont) {
 		bool areGood[FontTypesCount] = { false };
 		for (auto i = 0; i != FontTypesCount; ++i) {
 			const auto name = FontTypeNames[i];
@@ -259,7 +259,6 @@ void StartFonts() {
 			//QFont::insertSubstitution(name, fallback);
 #endif // Q_OS_WIN
 		}
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 
 #ifdef Q_OS_MAC
 		auto list = QStringList();
@@ -272,6 +271,7 @@ void StartFonts() {
 		}
 #endif // Q_OS_MAC
 	}
+#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 
 	if (!CustomMainFont.isEmpty() && ValidateFont(CustomMainFont)) {
 		Overrides[FontTypeRegular] = CustomMainFont;
@@ -372,7 +372,7 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 #ifdef DESKTOP_APP_USE_PACKAGED_FONTS
 		} else {
 #else // DESKTOP_APP_USE_PACKAGED_FONTS
-		} else if (UseSystemFont) {
+		} else if (UseSystemFont && overrideIsEmpty) {
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 			f.setWeight(QFont::DemiBold);
 		}
