@@ -125,35 +125,50 @@ bool LoadCustomFont(const QString &filePath, const QString &familyName, int flag
 	return ValidateFont(familyName, flags);
 }
 
+[[nodiscard]] QString SystemMonospaceFont() {
+	const auto type = QFontDatabase::FixedFont;
+	return QFontDatabase::systemFont(type).family();
+}
+
+bool TryFont(const QString &attempt) {
+	const auto resolved = QFontInfo(QFont(attempt)).family();
+	return !resolved.trimmed().compare(attempt, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString ManualMonospaceFont() {
+	const auto kTryFirst = std::initializer_list<QString>{
+		"Consolas",
+		"Liberation Mono",
+		"Menlo",
+		"Courier"
+	};
+	for (const auto &family : kTryFirst) {
+		if (TryFont(family)) {
+			return family;
+		}
+	}
+	return QString();
+}
+
 QString MonospaceFont() {
 	static const auto family = [&]() -> QString {
-		const auto tryFont = [&](const QString &attempt) {
-			const auto resolved = QFontInfo(QFont(attempt)).family();
-			return !resolved.trimmed().compare(attempt, Qt::CaseInsensitive);
-		};
-
-		if (tryFont(CustomMonospaceFont)) {
+		if (TryFont(CustomMonospaceFont)) {
 			return CustomMonospaceFont;
 		}
 
-#ifndef Q_OS_LINUX
-		if (!UseSystemFont) {
-			const auto kTryFirst = std::initializer_list<QString>{
-				"Consolas",
-				"Liberation Mono",
-				"Menlo",
-				"Courier"
-			};
-			for (const auto &family : kTryFirst) {
-				if (tryFont(family)) {
-					return family;
-				}
-			}
-		}
-#endif // !Q_OS_LINUX
+		const auto manual = ManualMonospaceFont();
+		const auto system = SystemMonospaceFont();
 
-		const auto type = QFontDatabase::FixedFont;
-		return QFontDatabase::systemFont(type).family();
+#if defined Q_OS_WIN || defined Q_OS_MAC
+		// Prefer our monospace font.
+		const auto useSystem = manual.isEmpty();
+#else // Q_OS_WIN || Q_OS_MAC
+		// Prefer system monospace font.
+		const auto metrics = QFontMetrics(QFont(system));
+		const auto useSystem = manual.isEmpty()
+			|| (metrics.charWidth("i", 0) == metrics.charWidth("W", 0));
+#endif // Q_OS_WIN || Q_OS_MAC
+		return (useSystem || UseSystemFont) ? system : manual;
 	}();
 
 	return family;
@@ -367,7 +382,7 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	f.setStrikeOut(_flags & FontStrikeOut);
 
 	if (_flags & FontSemibold) {
-		if (CustomSemiboldIsBold) {
+		if (CustomSemiboldIsBold || fontOverride.startsWith("DAOpenSansSemibold")) {
 			f.setBold(true);
 #ifdef DESKTOP_APP_USE_PACKAGED_FONTS
 		} else {
