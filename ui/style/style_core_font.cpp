@@ -396,7 +396,7 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	f.setStrikeOut(_flags & FontStrikeOut);
 
 	if (_flags & FontSemibold) {
-		if (CustomSemiboldIsBold || fontOverride.startsWith("DAOpenSansSemibold")) {
+		if (CustomSemiboldIsBold) {
 			f.setBold(true);
 		} else {
 			f.setStyleName("Semibold");
