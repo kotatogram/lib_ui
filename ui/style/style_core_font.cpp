@@ -195,19 +195,27 @@ enum {
 	FontTypesCount,
 };
 #ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+QString FontTypeFiles[FontTypesCount] = {
+	"DAOpenSansRegular",
+	"DAOpenSansRegularItalic",
+	"DAOpenSansSemiboldAsBold",
+	"DAOpenSansSemiboldItalicAsBold",
+	"DAOpenSansSemiboldAsBold",
+	"DAOpenSansSemiboldItalicAsBold",
+};
 QString FontTypeNames[FontTypesCount] = {
 	"DAOpenSansRegular",
 	"DAOpenSansRegularItalic",
-	"DAOpenSansBold",
-	"DAOpenSansBoldItalic",
+	"DAOpenSansSemibold",
+	"DAOpenSansSemiboldItalic",
 	"DAOpenSansSemibold",
 	"DAOpenSansSemiboldItalic",
 };
 QString FontTypePersianFallback[FontTypesCount] = {
 	"DAVazirRegular",
 	"DAVazirRegular",
-	"DAVazirBold",
-	"DAVazirBold",
+	"DAVazirMedium",
+	"DAVazirMedium",
 	"DAVazirMedium",
 	"DAVazirMedium",
 };
@@ -264,9 +272,10 @@ void StartFonts() {
 
 		bool areGood[FontTypesCount] = { false };
 		for (auto i = 0; i != FontTypesCount; ++i) {
+			const auto file = FontTypeFiles[i];
 			const auto name = FontTypeNames[i];
 			const auto flags = FontTypeFlags[i];
-			areGood[i] = LoadCustomFont(":/gui/fonts/" + name + ".ttf", name, flags);
+			areGood[i] = LoadCustomFont(":/gui/fonts/" + file + ".ttf", name, flags);
 			Overrides[i] = name;
 
 #ifdef Q_OS_WIN
@@ -390,12 +399,12 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	}
 
 	f.setPixelSize(size);
-	f.setBold(_flags & FontBold);
+	f.setBold((_flags & FontBold) || (_flags & FontSemibold));
 	f.setItalic(_flags & FontItalic);
 	f.setUnderline(_flags & FontUnderline);
 	f.setStrikeOut(_flags & FontStrikeOut);
 
-	if (_flags & FontSemibold) {
+	if ((_flags & FontBold) || (_flags & FontSemibold)) {
 		if (CustomSemiboldIsBold) {
 			f.setBold(true);
 		} else {
