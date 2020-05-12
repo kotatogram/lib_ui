@@ -211,6 +211,14 @@ QString FontTypeNames[FontTypesCount] = {
 	"DAOpenSansSemibold",
 	"DAOpenSansSemiboldItalic",
 };
+QString FontTypePersianFallbackFiles[FontTypesCount] = {
+	"DAVazirRegular",
+	"DAVazirRegular",
+	"DAVazirMediumAsBold",
+	"DAVazirMediumAsBold",
+	"DAVazirMediumAsBold",
+	"DAVazirMediumAsBold",
+};
 QString FontTypePersianFallback[FontTypesCount] = {
 	"DAVazirRegular",
 	"DAVazirRegular",
@@ -228,16 +236,6 @@ int32 FontTypeFlags[FontTypesCount] = {
 	FontSemibold,
 	FontSemibold | FontItalic,
 };
-#ifdef Q_OS_WIN
-QString FontTypeWindowsFallback[FontTypesCount] = {
-	"Segoe UI",
-	"Segoe UI",
-	"Segoe UI",
-	"Segoe UI",
-	"Segoe UI",
-	"Segoe UI",
-};
-#endif // Q_OS_WIN
 
 bool Started = false;
 QString Overrides[FontTypesCount];
@@ -266,10 +264,6 @@ void StartFonts() {
 
 #ifndef DESKTOP_APP_USE_PACKAGED_FONTS
 	if (!UseSystemFont) {
-		LoadCustomFont(":/gui/fonts/DAVazirRegular.ttf", "DAVazirRegular");
-		LoadCustomFont(":/gui/fonts/DAVazirBold.ttf", "DAVazirBold", style::internal::FontBold);
-		LoadCustomFont(":/gui/fonts/DAVazirMedium.ttf", "DAVazirMedium", style::internal::FontSemibold);
-
 		bool areGood[FontTypesCount] = { false };
 		for (auto i = 0; i != FontTypesCount; ++i) {
 			const auto file = FontTypeFiles[i];
@@ -278,12 +272,16 @@ void StartFonts() {
 			areGood[i] = LoadCustomFont(":/gui/fonts/" + file + ".ttf", name, flags);
 			Overrides[i] = name;
 
+		const auto persianFallbackFile = FontTypePersianFallbackFiles[i];
+		const auto persianFallback = FontTypePersianFallback[i];
+		LoadCustomFont(":/gui/fonts/" + persianFallbackFile + ".ttf", persianFallback, flags);
+
 #ifdef Q_OS_WIN
 			// Attempt to workaround a strange font bug with Open Sans Semibold not loading.
 			// See https://github.com/telegramdesktop/tdesktop/issues/3276 for details.
 			// Crash happens on "options.maxh / _t->_st->font->height" with "division by zero".
 			// In that place "_t->_st->font" is "semiboldFont" is "font(13 "Open Sans Semibold").
-			const auto fallback = FontTypeWindowsFallback[i];
+			const auto fallback = "Segoe UI";
 			if (!areGood[i]) {
 				if (ValidateFont(fallback, flags)) {
 					Overrides[i] = fallback;
@@ -296,10 +294,7 @@ void StartFonts() {
 			//QFont::insertSubstitution(name, fallback);
 #endif // Q_OS_WIN
 
-#if defined Q_OS_WIN || defined Q_OS_LINUX
-		const auto persianFallback = FontTypePersianFallback[i];
 		QFont::insertSubstitution(name, persianFallback);
-#endif // Q_OS_WIN || Q_OS_LINUX
 	}
 
 #ifdef Q_OS_MAC
@@ -399,17 +394,17 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	}
 
 	f.setPixelSize(size);
-	f.setBold((_flags & FontBold) || (_flags & FontSemibold));
 	f.setItalic(_flags & FontItalic);
 	f.setUnderline(_flags & FontUnderline);
 	f.setStrikeOut(_flags & FontStrikeOut);
 
 	if ((_flags & FontBold) || (_flags & FontSemibold)) {
-		if (CustomSemiboldIsBold) {
-			f.setBold(true);
-		} else {
-			f.setStyleName("Semibold");
-		}
+#ifdef DESKTOP_APP_USE_PACKAGED_FONTS
+		f.setWeight(QFont::DemiBold);
+#else // DESKTOP_APP_USE_PACKAGED_FONTS
+		f.setBold(true);
+		f.setStyleName("Semibold");
+#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 	}
 
 	if (IsRealSemibold(fontOverride)) {
