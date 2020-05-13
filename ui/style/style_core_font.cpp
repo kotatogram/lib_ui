@@ -400,10 +400,16 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 
 	if ((_flags & FontBold) || (_flags & FontSemibold)) {
 #ifdef DESKTOP_APP_USE_PACKAGED_FONTS
-		f.setWeight(QFont::DemiBold);
+		if (CustomSemiboldIsBold) {
+			f.setBold(true);
+		} else {
+			f.setWeight(QFont::DemiBold);
+		}
 #else // DESKTOP_APP_USE_PACKAGED_FONTS
 		f.setBold(true);
-		f.setStyleName("Semibold");
+		if (!CustomSemiboldIsBold) {
+			f.setStyleName("Semibold");
+		}
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 	}
 
