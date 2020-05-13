@@ -399,18 +399,18 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	f.setStrikeOut(_flags & FontStrikeOut);
 
 	if ((_flags & FontBold) || (_flags & FontSemibold)) {
-#ifdef DESKTOP_APP_USE_PACKAGED_FONTS
 		if (CustomSemiboldIsBold) {
 			f.setBold(true);
+#ifdef DESKTOP_APP_USE_PACKAGED_FONTS
 		} else {
 			f.setWeight(QFont::DemiBold);
-		}
 #else // DESKTOP_APP_USE_PACKAGED_FONTS
-		f.setBold(true);
-		if (!CustomSemiboldIsBold) {
+		} else if (UseSystemFont) {
+			f.setWeight(QFont::DemiBold);
+		} else {
 			f.setStyleName("Semibold");
-		}
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+		}
 	}
 
 	if (IsRealSemibold(fontOverride)) {
