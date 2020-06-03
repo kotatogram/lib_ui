@@ -412,6 +412,12 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 			f.setStyleName("Semibold");
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 		}
+
+		if (_flags & FontItalic) {
+			f.setStyleName("Semibold Italic");
+		} else {
+			f.setStyleName("Semibold");
+		}
 	}
 
 	if (IsRealSemibold(fontOverride)) {
