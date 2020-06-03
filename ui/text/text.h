@@ -7,6 +7,7 @@
 #pragma once
 
 #include "ui/text/text_entity.h"
+#include "ui/text/text_block.h"
 #include "ui/painter.h"
 #include "ui/click_handler.h"
 #include "base/flags.h"
@@ -47,19 +48,20 @@ enum class TextSelectType {
 };
 
 struct TextSelection {
-	constexpr TextSelection() : from(0), to(0) {
-	}
+	constexpr TextSelection() = default;
 	constexpr TextSelection(uint16 from, uint16 to) : from(from), to(to) {
 	}
 	constexpr bool empty() const {
 		return from == to;
 	}
-	uint16 from;
-	uint16 to;
+	uint16 from = 0;
+	uint16 to = 0;
 };
+
 inline bool operator==(TextSelection a, TextSelection b) {
 	return a.from == b.from && a.to == b.to;
 }
+
 inline bool operator!=(TextSelection a, TextSelection b) {
 	return !(a == b);
 }
@@ -69,7 +71,6 @@ static constexpr TextSelection AllTextSelection = { 0, 0xFFFF };
 namespace Ui {
 namespace Text {
 
-class AbstractBlock;
 struct IsolatedEmoji;
 
 struct StateRequest {
@@ -108,11 +109,17 @@ struct StateRequestElided : public StateRequest {
 class String {
 public:
 	String(int32 minResizeWidth = QFIXED_MAX);
-	String(const style::TextStyle &st, const QString &text, const TextParseOptions &options = _defaultOptions, int32 minResizeWidth = QFIXED_MAX, bool richText = false);
-	String(const String &other);
-	String(String &&other);
-	String &operator=(const String &other);
-	String &operator=(String &&other);
+	String(
+		const style::TextStyle &st,
+		const QString &text,
+		const TextParseOptions &options = _defaultOptions,
+		int32 minResizeWidth = QFIXED_MAX,
+		bool richText = false);
+	String(const String &other) = default;
+	String(String &&other) = default;
+	String &operator=(const String &other) = default;
+	String &operator=(String &&other) = default;
+	~String() = default;
 
 	int countWidth(int width, bool breakEverywhere = false) const;
 	int countHeight(int width, bool breakEverywhere = false) const;
@@ -168,34 +175,14 @@ public:
 		TextSelection selection = AllTextSelection) const;
 	IsolatedEmoji toIsolatedEmoji() const;
 
-	bool lastDots(int32 dots, int32 maxdots = 3) { // hack for typing animation
-		if (_text.size() < maxdots) return false;
-
-		int32 nowDots = 0, from = _text.size() - maxdots, to = _text.size();
-		for (int32 i = from; i < to; ++i) {
-			if (_text.at(i) == QChar('.')) {
-				++nowDots;
-			}
-		}
-		if (nowDots == dots) return false;
-		for (int32 j = from; j < from + dots; ++j) {
-			_text[j] = QChar('.');
-		}
-		for (int32 j = from + dots; j < to; ++j) {
-			_text[j] = QChar(' ');
-		}
-		return true;
-	}
-
 	const style::TextStyle *style() const {
 		return _st;
 	}
 
 	void clear();
-	~String();
 
 private:
-	using TextBlocks = std::vector<std::unique_ptr<AbstractBlock>>;
+	using TextBlocks = QVector<Block>;
 	using TextLinks = QVector<ClickHandlerPtr>;
 
 	uint16 countBlockEnd(const TextBlocks::const_iterator &i, const TextBlocks::const_iterator &e) const;
@@ -239,6 +226,15 @@ private:
 
 };
 
+[[nodiscard]] bool IsWordSeparator(QChar ch);
+[[nodiscard]] bool IsAlmostLinkEnd(QChar ch);
+[[nodiscard]] bool IsLinkEnd(QChar ch);
+[[nodiscard]] bool IsNewline(QChar ch);
+[[nodiscard]] bool IsSpace(QChar ch, bool rich = false);
+[[nodiscard]] bool IsDiac(QChar ch);
+[[nodiscard]] bool IsReplacedBySpace(QChar ch);
+[[nodiscard]] bool IsTrimmed(QChar ch, bool rich = false);
+
 } // namespace Text
 } // namespace Ui
 
@@ -268,120 +264,3 @@ QString textcmdLink(const QString &url, const QString &text);
 QString textcmdStartSemibold();
 QString textcmdStopSemibold();
 const QChar *textSkipCommand(const QChar *from, const QChar *end, bool canLink = true);
-
-inline bool chIsSpace(QChar ch, bool rich = false) {
-	return ch.isSpace() || (ch < 32 && !(rich && ch == TextCommand)) || (ch == QChar::ParagraphSeparator) || (ch == QChar::LineSeparator) || (ch == QChar::ObjectReplacementCharacter) || (ch == QChar::CarriageReturn) || (ch == QChar::Tabulation) || (ch == QChar(8203)/*Zero width space.*/);
-}
-inline bool chIsDiac(QChar ch) { // diac and variation selectors
-	return (ch.category() == QChar::Mark_NonSpacing) || (ch == 1652) || (ch >= 64606 && ch <= 64611);
-}
-
-bool chIsBad(QChar ch);
-
-inline bool chIsTrimmed(QChar ch, bool rich = false) {
-	return (!rich || ch != TextCommand) && (chIsSpace(ch) || chIsBad(ch));
-}
-inline bool chReplacedBySpace(QChar ch) {
-	// \xe2\x80[\xa8 - \xac\xad] // 8232 - 8237
-	// QString from1 = QString::fromUtf8("\xe2\x80\xa8"), to1 = QString::fromUtf8("\xe2\x80\xad");
-	// \xcc[\xb3\xbf\x8a] // 819, 831, 778
-	// QString bad1 = QString::fromUtf8("\xcc\xb3"), bad2 = QString::fromUtf8("\xcc\xbf"), bad3 = QString::fromUtf8("\xcc\x8a");
-	// [\x00\x01\x02\x07\x08\x0b-\x1f] // '\t' = 0x09
-	return (/*code >= 0x00 && */ch <= 0x02) || (ch >= 0x07 && ch <= 0x09) || (ch >= 0x0b && ch <= 0x1f) ||
-		(ch == 819) || (ch == 831) || (ch == 778) || (ch >= 8232 && ch <= 8237);
-}
-inline int32 chMaxDiacAfterSymbol() {
-	return 2;
-}
-inline bool chIsNewline(QChar ch) {
-	return (ch == QChar::LineFeed || ch == 156);
-}
-inline bool chIsLinkEnd(QChar ch) {
-	return ch == TextCommand || chIsBad(ch) || chIsSpace(ch) || chIsNewline(ch) || ch.isLowSurrogate() || ch.isHighSurrogate();
-}
-inline bool chIsAlmostLinkEnd(QChar ch) {
-	switch (ch.unicode()) {
-	case '?':
-	case ',':
-	case '.':
-	case '"':
-	case ':':
-	case '!':
-	case '\'':
-		return true;
-	default:
-		break;
-	}
-	return false;
-}
-inline bool chIsWordSeparator(QChar ch) {
-	switch (ch.unicode()) {
-	case QChar::Space:
-	case QChar::LineFeed:
-	case '.':
-	case ',':
-	case '?':
-	case '!':
-	case '@':
-	case '#':
-	case '$':
-	case ':':
-	case ';':
-	case '-':
-	case '<':
-	case '>':
-	case '[':
-	case ']':
-	case '(':
-	case ')':
-	case '{':
-	case '}':
-	case '=':
-	case '/':
-	case '+':
-	case '%':
-	case '&':
-	case '^':
-	case '*':
-	case '\'':
-	case '"':
-	case '`':
-	case '~':
-	case '|':
-		return true;
-	default:
-		break;
-	}
-	return false;
-}
-inline bool chIsSentenceEnd(QChar ch) {
-	switch (ch.unicode()) {
-	case '.':
-	case '?':
-	case '!':
-		return true;
-	default:
-		break;
-	}
-	return false;
-}
-inline bool chIsSentencePartEnd(QChar ch) {
-	switch (ch.unicode()) {
-	case ',':
-	case ':':
-	case ';':
-		return true;
-	default:
-		break;
-	}
-	return false;
-}
-inline bool chIsParagraphSeparator(QChar ch) {
-	switch (ch.unicode()) {
-	case QChar::LineFeed:
-		return true;
-	default:
-		break;
-	}
-	return false;
-}

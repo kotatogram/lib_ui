@@ -21,10 +21,14 @@ namespace Text {
 namespace {
 
 constexpr auto kStringLinkIndexShift = uint16(0x8000);
+constexpr auto kMaxDiacAfterSymbol = 2;
 
-Qt::LayoutDirection StringDirection(const QString &str, int32 from, int32 to) {
-	const ushort *p = reinterpret_cast<const ushort*>(str.unicode()) + from;
-	const ushort *end = p + (to - from);
+Qt::LayoutDirection StringDirection(
+		const QString &str,
+		int from,
+		int to) {
+	auto p = reinterpret_cast<const ushort*>(str.unicode()) + from;
+	const auto end = p + (to - from);
 	while (p < end) {
 		uint ucs4 = *p;
 		if (QChar::isHighSurrogate(ucs4) && p < end - 1) {
@@ -98,7 +102,9 @@ TextWithEntities PrepareRichFromRich(
 	return result;
 }
 
-QFixed ComputeStopAfter(const TextParseOptions &options, const style::TextStyle &st) {
+QFixed ComputeStopAfter(
+		const TextParseOptions &options,
+		const style::TextStyle &st) {
 	return (options.maxw > 0 && options.maxh > 0)
 		? ((options.maxh / st.font->height) + 1) * options.maxw
 		: QFIXED_MAX;
@@ -112,11 +118,17 @@ bool ComputeCheckTilde(const style::TextStyle &st) {
 		&& (font->f.family() == qstr("DAOpenSansRegular"));
 }
 
-} // namespace
-} // namespace Text
-} // namespace Ui
+bool IsParagraphSeparator(QChar ch) {
+	switch (ch.unicode()) {
+	case QChar::LineFeed:
+		return true;
+	default:
+		break;
+	}
+	return false;
+}
 
-bool chIsBad(QChar ch) {
+bool IsBad(QChar ch) {
 	return (ch == 0)
 		|| (ch >= 8232 && ch < 8237)
 		|| (ch >= 65024 && ch < 65040 && ch != 65039)
@@ -130,8 +142,12 @@ bool chIsBad(QChar ch) {
 			&& !Platform::IsMac10_12OrGreater()
 			&& ch >= 0x0B00
 			&& ch <= 0x0B7F
-			&& chIsDiac(ch));
+			&& IsDiac(ch));
 }
+
+} // namespace
+} // namespace Text
+} // namespace Ui
 
 QString textcmdSkipBlock(ushort w, ushort h) {
 	static QString cmd(5, TextCommand);
@@ -461,13 +477,13 @@ void Parser::createBlock(int32 skipBack) {
 		}
 		_lastSkipped = false;
 		if (_emoji) {
-			_t->_blocks.push_back(std::make_unique<EmojiBlock>(_t->_st->font, _t->_text, _blockStart, len, _flags, _lnkIndex, _emoji));
+			_t->_blocks.push_back(Block::Emoji(_t->_st->font, _t->_text, _blockStart, len, _flags, _lnkIndex, _emoji));
 			_emoji = nullptr;
 			_lastSkipped = true;
 		} else if (newline) {
-			_t->_blocks.push_back(std::make_unique<NewlineBlock>(_t->_st->font, _t->_text, _blockStart, len, _flags, _lnkIndex));
+			_t->_blocks.push_back(Block::Newline(_t->_st->font, _t->_text, _blockStart, len, _flags, _lnkIndex));
 		} else {
-			_t->_blocks.push_back(std::make_unique<TextBlock>(_t->_st->font, _t->_text, _t->_minResizeWidth, _blockStart, len, _flags, _lnkIndex));
+			_t->_blocks.push_back(Block::Text(_t->_st->font, _t->_text, _t->_minResizeWidth, _blockStart, len, _flags, _lnkIndex));
 		}
 		_blockStart += len;
 		blockCreated();
@@ -477,7 +493,7 @@ void Parser::createBlock(int32 skipBack) {
 void Parser::createSkipBlock(int32 w, int32 h) {
 	createBlock();
 	_t->_text.push_back('_');
-	_t->_blocks.push_back(std::make_unique<SkipBlock>(_t->_st->font, _t->_text, _blockStart++, w, h, _lnkIndex));
+	_t->_blocks.push_back(Block::Skip(_t->_st->font, _t->_text, _blockStart++, w, h, _lnkIndex));
 	blockCreated();
 }
 
@@ -745,18 +761,18 @@ bool Parser::readCommand() {
 void Parser::parseCurrentChar() {
 	_ch = ((_ptr < _end) ? *_ptr : 0);
 	_emojiLookback = 0;
-	const auto isNewLine = _multiline && chIsNewline(_ch);
-	const auto isSpace = chIsSpace(_ch);
-	const auto isDiac = chIsDiac(_ch);
+	const auto isNewLine = _multiline && IsNewline(_ch);
+	const auto isSpace = IsSpace(_ch);
+	const auto isDiac = IsDiac(_ch);
 	const auto isTilde = _checkTilde && (_ch == '~');
 	const auto skip = [&] {
-		if (chIsBad(_ch) || _ch.isLowSurrogate()) {
+		if (IsBad(_ch) || _ch.isLowSurrogate()) {
 			return true;
 		} else if (_ch == 0xFE0F && Platform::IsMac()) {
 			// Some sequences like 0x0E53 0xFE0F crash OS X harfbuzz text processing :(
 			return true;
 		} else if (isDiac) {
-			if (_lastSkipped || _emoji || ++_diacs > chMaxDiacAfterSymbol()) {
+			if (_lastSkipped || _emoji || ++_diacs > kMaxDiacAfterSymbol) {
 				return true;
 			}
 		} else if (_ch.isHighSurrogate()) {
@@ -891,10 +907,10 @@ void Parser::trimSourceRange() {
 		_source.entities,
 		_end - _start);
 
-	while (_ptr != _end && chIsTrimmed(*_ptr, _rich) && _ptr != _start + firstMonospaceOffset) {
+	while (_ptr != _end && IsTrimmed(*_ptr, _rich) && _ptr != _start + firstMonospaceOffset) {
 		++_ptr;
 	}
-	while (_ptr != _end && chIsTrimmed(*(_end - 1), _rich)) {
+	while (_ptr != _end && IsTrimmed(*(_end - 1), _rich)) {
 		--_end;
 	}
 }
@@ -913,15 +929,14 @@ void Parser::checkForElidedSkipBlock() {
 
 void Parser::finalize(const TextParseOptions &options) {
 	_t->_links.resize(_maxLnkIndex);
-	for (const auto &block : _t->_blocks) {
-		const auto b = block.get();
-		const auto shiftedIndex = b->lnkIndex();
+	for (auto &block : _t->_blocks) {
+		const auto shiftedIndex = block->lnkIndex();
 		if (shiftedIndex <= kStringLinkIndexShift) {
 			continue;
 		}
 		const auto realIndex = (shiftedIndex - kStringLinkIndexShift);
 		const auto index = _maxLnkIndex + realIndex;
-		b->setLnkIndex(index);
+		block->setLnkIndex(index);
 		if (_t->_links.size() >= index) {
 			continue;
 		}
@@ -935,7 +950,7 @@ void Parser::finalize(const TextParseOptions &options) {
 		}
 	}
 	_t->_links.squeeze();
-	_t->_blocks.shrink_to_fit();
+	_t->_blocks.squeeze();
 	_t->_text.squeeze();
 }
 
@@ -1165,7 +1180,7 @@ public:
 					_wLeft -= _elideRemoveFromEnd;
 				}
 
-				_parDirection = static_cast<NewlineBlock*>(b)->nextDirection();
+				_parDirection = static_cast<const NewlineBlock*>(b)->nextDirection();
 				if (_parDirection == Qt::LayoutDirectionAuto) _parDirection = style::LayoutDirection();
 				initNextParagraph(i + 1);
 
@@ -1187,7 +1202,7 @@ public:
 			}
 
 			if (_btype == TextBlockTText) {
-				auto t = static_cast<TextBlock*>(b);
+				auto t = static_cast<const TextBlock*>(b);
 				if (t->_words.isEmpty()) { // no words in this block, spaces only => layout this block in the same line
 					_last_rPadding += b->f_rpadding();
 
@@ -1678,7 +1693,7 @@ private:
 					}
 					Emoji::Draw(
 						*_p,
-						static_cast<EmojiBlock*>(currentBlock)->emoji,
+						static_cast<const EmojiBlock*>(currentBlock)->_emoji,
 						Emoji::GetSizeNormal(),
 						(glyphX + st::emojiPadding).toInt(),
 						_y + _yDelta + emojiY);
@@ -1847,7 +1862,7 @@ private:
 		_p->fillRect(left, _y + _yDelta, width, _fontHeight, _textPalette->selectBg);
 	}
 
-	void elideSaveBlock(int32 blockIndex, AbstractBlock *&_endBlock, int32 elideStart, int32 elideWidth) {
+	void elideSaveBlock(int32 blockIndex, const AbstractBlock *&_endBlock, int32 elideStart, int32 elideWidth) {
 		if (_elideSavedBlock) {
 			restoreAfterElided();
 		}
@@ -1855,7 +1870,7 @@ private:
 		_elideSavedIndex = blockIndex;
 		auto mutableText = const_cast<String*>(_t);
 		_elideSavedBlock = std::move(mutableText->_blocks[blockIndex]);
-		mutableText->_blocks[blockIndex] = std::make_unique<TextBlock>(_t->_st->font, _t->_text, QFIXED_MAX, elideStart, 0, _elideSavedBlock->flags(), _elideSavedBlock->lnkIndex());
+		mutableText->_blocks[blockIndex] = Block::Text(_t->_st->font, _t->_text, QFIXED_MAX, elideStart, 0, (*_elideSavedBlock)->flags(), (*_elideSavedBlock)->lnkIndex());
 		_blocksSize = blockIndex + 1;
 		_endBlock = (blockIndex + 1 < _t->_blocks.size() ? _t->_blocks[blockIndex + 1].get() : nullptr);
 	}
@@ -1870,7 +1885,7 @@ private:
 		}
 	}
 
-	void prepareElidedLine(QString &lineText, int32 lineStart, int32 &lineLength, AbstractBlock *&_endBlock, int repeat = 0) {
+	void prepareElidedLine(QString &lineText, int32 lineStart, int32 &lineLength, const AbstractBlock *&_endBlock, int repeat = 0) {
 		static const auto _Elide = QString::fromLatin1("...");
 
 		_f = _t->_st->font;
@@ -1980,7 +1995,7 @@ private:
 
 	void restoreAfterElided() {
 		if (_elideSavedBlock) {
-			const_cast<String*>(_t)->_blocks[_elideSavedIndex] = std::move(_elideSavedBlock);
+			const_cast<String*>(_t)->_blocks[_elideSavedIndex] = std::move(*_elideSavedBlock);
 		}
 	}
 
@@ -2034,7 +2049,7 @@ private:
 		return result;
 	}
 
-	void eSetFont(AbstractBlock *block) {
+	void eSetFont(const AbstractBlock *block) {
 		const auto flags = block->flags();
 		const auto usedFont = [&] {
 			if (const auto index = block->lnkIndex()) {
@@ -2609,7 +2624,7 @@ private:
 	}
 
 private:
-	void applyBlockProperties(AbstractBlock *block) {
+	void applyBlockProperties(const AbstractBlock *block) {
 		eSetFont(block);
 		if (_p) {
 			if (block->lnkIndex()) {
@@ -2660,7 +2675,7 @@ private:
 	// elided hack support
 	int _blocksSize = 0;
 	int _elideSavedIndex = 0;
-	std::unique_ptr<AbstractBlock> _elideSavedBlock;
+	std::optional<Block> _elideSavedBlock;
 
 	int _lineStart = 0;
 	int _localFrom = 0;
@@ -2679,66 +2694,13 @@ private:
 String::String(int32 minResizeWidth) : _minResizeWidth(minResizeWidth) {
 }
 
-String::String(const style::TextStyle &st, const QString &text, const TextParseOptions &options, int32 minResizeWidth, bool richText) : _minResizeWidth(minResizeWidth) {
+String::String(const style::TextStyle &st, const QString &text, const TextParseOptions &options, int32 minResizeWidth, bool richText)
+: _minResizeWidth(minResizeWidth) {
 	if (richText) {
 		setRichText(st, text, options);
 	} else {
 		setText(st, text, options);
 	}
-}
-
-String::String(const String &other)
-: _minResizeWidth(other._minResizeWidth)
-, _maxWidth(other._maxWidth)
-, _minHeight(other._minHeight)
-, _text(other._text)
-, _st(other._st)
-, _links(other._links)
-, _startDir(other._startDir) {
-	_blocks.reserve(other._blocks.size());
-	for (auto &block : other._blocks) {
-		_blocks.push_back(block->clone());
-	}
-}
-
-String::String(String &&other)
-: _minResizeWidth(other._minResizeWidth)
-, _maxWidth(other._maxWidth)
-, _minHeight(other._minHeight)
-, _text(other._text)
-, _st(other._st)
-, _blocks(std::move(other._blocks))
-, _links(other._links)
-, _startDir(other._startDir) {
-	other.clearFields();
-}
-
-String &String::operator=(const String &other) {
-	_minResizeWidth = other._minResizeWidth;
-	_maxWidth = other._maxWidth;
-	_minHeight = other._minHeight;
-	_text = other._text;
-	_st = other._st;
-	_blocks = TextBlocks(other._blocks.size());
-	_links = other._links;
-	_startDir = other._startDir;
-	for (int32 i = 0, l = _blocks.size(); i < l; ++i) {
-		_blocks[i] = other._blocks.at(i)->clone();
-	}
-	return *this;
-}
-
-String &String::operator=(String &&other) {
-	_minResizeWidth = other._minResizeWidth;
-	_maxWidth = other._maxWidth;
-	_minHeight = other._minHeight;
-	_text = other._text;
-	_st = other._st;
-	_blocks = std::move(other._blocks);
-	_links = other._links;
-	_startDir = other._startDir;
-	other.clearFields();
-	return *this;
 }
 
 void String::setText(const style::TextStyle &st, const QString &text, const TextParseOptions &options) {
@@ -2757,8 +2719,8 @@ void String::recountNaturalSize(bool initial, Qt::LayoutDirection optionsDir) {
 	int32 lineHeight = 0;
 	int32 lastNewlineStart = 0;
 	QFixed _width = 0, last_rBearing = 0, last_rPadding = 0;
-	for (auto i = _blocks.cbegin(), e = _blocks.cend(); i != e; ++i) {
-		auto b = i->get();
+	for (auto &block : _blocks) {
+		auto b = block.get();
 		auto _btype = b->type();
 		auto blockHeight = countBlockHeight(b, _st);
 		if (_btype == TextBlockTNewline) {
@@ -2775,7 +2737,7 @@ void String::recountNaturalSize(bool initial, Qt::LayoutDirection optionsDir) {
 				}
 			}
 			lastNewlineStart = b->from();
-			lastNewline = static_cast<NewlineBlock*>(b);
+			lastNewline = &block.unsafe<NewlineBlock>();
 
 			_minHeight += lineHeight;
 			lineHeight = 0;
@@ -2824,19 +2786,19 @@ void String::recountNaturalSize(bool initial, Qt::LayoutDirection optionsDir) {
 }
 
 int String::countMaxMonospaceWidth() const {
-	NewlineBlock *lastNewline = 0;
+	const NewlineBlock *lastNewline = nullptr;
 
 	auto result = QFixed();
 	auto paragraphWidth = QFixed();
 	auto lastNewlineStart = 0;
 	auto fullMonospace = true;
 	QFixed _width = 0, last_rBearing = 0, last_rPadding = 0;
-	for (auto i = _blocks.cbegin(), e = _blocks.cend(); i != e; ++i) {
-		auto b = i->get();
+	for (auto &block : _blocks) {
+		auto b = block.get();
 		auto _btype = b->type();
 		if (_btype == TextBlockTNewline) {
 			lastNewlineStart = b->from();
-			lastNewline = static_cast<NewlineBlock*>(b);
+			lastNewline = &block.unsafe<NewlineBlock>();
 
 			last_rBearing = b->f_rbearing();
 			last_rPadding = b->f_rpadding();
@@ -2892,7 +2854,7 @@ void String::setMarkedText(const style::TextStyle &st, const TextWithEntities &t
 //		for (const QChar *ch = text.constData(), *e = ch + text.size(); ch != e; ++ch) {
 //			if (*ch == TextCommand) {
 //				break;
-//			} else if (chIsNewline(*ch)) {
+//			} else if (IsNewline(*ch)) {
 //				newText.append("},").append(*ch).append("\t{ ");
 //			} else {
 //				if (ch->isHighSurrogate() || ch->isLowSurrogate()) {
@@ -2943,7 +2905,7 @@ bool String::updateSkipBlock(int width, int height) {
 		_blocks.pop_back();
 	}
 	_text.push_back('_');
-	_blocks.push_back(std::make_unique<SkipBlock>(
+	_blocks.push_back(Block::Skip(
 		_st->font,
 		_text,
 		_text.size() - 1,
@@ -3036,7 +2998,7 @@ void String::enumerateLines(
 		}
 
 		if (_btype == TextBlockTText) {
-			auto t = static_cast<TextBlock*>(b.get());
+			const auto t = &b.unsafe<TextBlock>();
 			if (t->_words.isEmpty()) { // no words in this block, spaces only => layout this block in the same line
 				last_rPadding += b->f_rpadding();
 
@@ -3157,31 +3119,31 @@ TextSelection String::adjustSelection(TextSelection selection, TextSelectType se
 	if (from < _text.size() && from <= to) {
 		if (to > _text.size()) to = _text.size();
 		if (selectType == TextSelectType::Paragraphs) {
-			if (!chIsParagraphSeparator(_text.at(from))) {
-				while (from > 0 && !chIsParagraphSeparator(_text.at(from - 1))) {
+			if (!IsParagraphSeparator(_text.at(from))) {
+				while (from > 0 && !IsParagraphSeparator(_text.at(from - 1))) {
 					--from;
 				}
 			}
 			if (to < _text.size()) {
-				if (chIsParagraphSeparator(_text.at(to))) {
+				if (IsParagraphSeparator(_text.at(to))) {
 					++to;
 				} else {
-					while (to < _text.size() && !chIsParagraphSeparator(_text.at(to))) {
+					while (to < _text.size() && !IsParagraphSeparator(_text.at(to))) {
 						++to;
 					}
 				}
 			}
 		} else if (selectType == TextSelectType::Words) {
-			if (!chIsWordSeparator(_text.at(from))) {
-				while (from > 0 && !chIsWordSeparator(_text.at(from - 1))) {
+			if (!IsWordSeparator(_text.at(from))) {
+				while (from > 0 && !IsWordSeparator(_text.at(from - 1))) {
 					--from;
 				}
 			}
 			if (to < _text.size()) {
-				if (chIsWordSeparator(_text.at(to))) {
+				if (IsWordSeparator(_text.at(to))) {
 					++to;
 				} else {
-					while (to < _text.size() && !chIsWordSeparator(_text.at(to))) {
+					while (to < _text.size() && !IsWordSeparator(_text.at(to))) {
 						++to;
 					}
 				}
@@ -3389,7 +3351,7 @@ IsolatedEmoji String::toIsolatedEmoji() const {
 		if (block->lnkIndex()) {
 			return IsolatedEmoji();
 		} else if (type == TextBlockTEmoji) {
-			result.items[index++] = static_cast<EmojiBlock*>(block.get())->emoji;
+			result.items[index++] = block.unsafe<EmojiBlock>()._emoji;
 		} else if (type != TextBlockTSkip) {
 			return IsolatedEmoji();
 		}
@@ -3409,7 +3371,113 @@ void String::clearFields() {
 	_startDir = Qt::LayoutDirectionAuto;
 }
 
-String::~String() = default;
+bool IsWordSeparator(QChar ch) {
+	switch (ch.unicode()) {
+	case QChar::Space:
+	case QChar::LineFeed:
+	case '.':
+	case ',':
+	case '?':
+	case '!':
+	case '@':
+	case '#':
+	case '$':
+	case ':':
+	case ';':
+	case '-':
+	case '<':
+	case '>':
+	case '[':
+	case ']':
+	case '(':
+	case ')':
+	case '{':
+	case '}':
+	case '=':
+	case '/':
+	case '+':
+	case '%':
+	case '&':
+	case '^':
+	case '*':
+	case '\'':
+	case '"':
+	case '`':
+	case '~':
+	case '|':
+		return true;
+	default:
+		break;
+	}
+	return false;
+}
+
+bool IsAlmostLinkEnd(QChar ch) {
+	switch (ch.unicode()) {
+	case '?':
+	case ',':
+	case '.':
+	case '"':
+	case ':':
+	case '!':
+	case '\'':
+		return true;
+	default:
+		break;
+	}
+	return false;
+}
+
+bool IsLinkEnd(QChar ch) {
+	return (ch == TextCommand)
+		|| IsBad(ch)
+		|| IsSpace(ch)
+		|| IsNewline(ch)
+		|| ch.isLowSurrogate()
+		|| ch.isHighSurrogate();
+}
+
+bool IsNewline(QChar ch) {
+	return (ch == QChar::LineFeed)
+		|| (ch == 156);
+}
+
+bool IsSpace(QChar ch, bool rich) {
+	return ch.isSpace()
+		|| (ch < 32 && !(rich && ch == TextCommand))
+		|| (ch == QChar::ParagraphSeparator)
+		|| (ch == QChar::LineSeparator)
+		|| (ch == QChar::ObjectReplacementCharacter)
+		|| (ch == QChar::CarriageReturn)
+		|| (ch == QChar::Tabulation)
+		|| (ch == QChar(8203)/*Zero width space.*/);
+}
+
+bool IsDiac(QChar ch) { // diac and variation selectors
+	return (ch.category() == QChar::Mark_NonSpacing)
+		|| (ch == 1652)
+		|| (ch >= 64606 && ch <= 64611);
+}
+
+bool IsReplacedBySpace(QChar ch) {
+	// \xe2\x80[\xa8 - \xac\xad] // 8232 - 8237
+	// QString from1 = QString::fromUtf8("\xe2\x80\xa8"), to1 = QString::fromUtf8("\xe2\x80\xad");
+	// \xcc[\xb3\xbf\x8a] // 819, 831, 778
+	// QString bad1 = QString::fromUtf8("\xcc\xb3"), bad2 = QString::fromUtf8("\xcc\xbf"), bad3 = QString::fromUtf8("\xcc\x8a");
+	// [\x00\x01\x02\x07\x08\x0b-\x1f] // '\t' = 0x09
+	return (/*code >= 0x00 && */ch <= 0x02)
+		|| (ch >= 0x07 && ch <= 0x09)
+		|| (ch >= 0x0b && ch <= 0x1f)
+		|| (ch == 819)
+		|| (ch == 831)
+		|| (ch == 778)
+		|| (ch >= 8232 && ch <= 8237);
+}
+
+bool IsTrimmed(QChar ch, bool rich) {
+	return (!rich || ch != TextCommand)
+		&& (IsSpace(ch) || IsBad(ch));
+}
 
 } // namespace Text
 } // namespace Ui
