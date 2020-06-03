@@ -409,7 +409,6 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 			f.setWeight(QFont::DemiBold);
 		} else {
 			f.setBold(true);
-			f.setStyleName("Semibold");
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 		}
 
@@ -421,7 +420,11 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	}
 
 	if (IsRealSemibold(fontOverride)) {
-		f.setStyleName("Semibold");
+		if (_flags & FontItalic) {
+			f.setStyleName("Semibold Italic");
+		} else {
+			f.setStyleName("Semibold");
+		}
 	}
 
 	m = QFontMetrics(f);
