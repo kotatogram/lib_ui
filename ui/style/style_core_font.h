@@ -22,7 +22,11 @@ extern bool UseSystemFont;
 extern bool UseOriginalMetrics;
 
 void StartFonts();
+[[nodiscard]] QString GetPossibleEmptyOverride(int32 flags = 0);
 [[nodiscard]] QString GetFontOverride(int32 flags = 0);
+[[nodiscard]] bool IsRealSemibold(const QString &familyName);
+[[nodiscard]] QString ParseFamilyName(const QString &familyName);
+[[nodiscard]] QString MonospaceFont();
 
 void destroyFonts();
 int registerFontFamily(const QString &family);
@@ -74,17 +78,19 @@ enum FontFlags {
 
 class FontData {
 public:
-
-	int32 width(const QString &str) const {
+	int width(const QString &str) const {
 		return m.width(str);
 	}
-	int32 width(const QString &str, int32 from, int32 to) const {
+	int width(const QString &str, int32 from, int32 to) const {
 		return width(str.mid(from, to));
 	}
-	int32 width(QChar ch) const {
+	int width(QChar ch) const {
 		return m.width(ch);
 	}
-	QString elided(const QString &str, int32 width, Qt::TextElideMode mode = Qt::ElideRight) const {
+	QString elided(
+			const QString &str,
+			int width,
+			Qt::TextElideMode mode = Qt::ElideRight) const {
 		return m.elidedText(str, mode, width);
 	}
 

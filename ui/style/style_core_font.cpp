@@ -6,6 +6,7 @@
 //
 #include "ui/style/style_core_font.h"
 
+#include "ui/style/style_core_custom_font.h"
 #include "ui/ui_log.h"
 #include "base/algorithm.h"
 #include "ui/integration.h"
@@ -45,33 +46,6 @@ QString RemoveSemiboldFromName(const QString &familyName) {
 	auto removedSemibold = familyName;
 	removedSemibold.remove("Semibold", Qt::CaseInsensitive);
 	return removedSemibold.trimmed();
-}
-
-bool IsRealSemibold(const QString &familyName) {
-	const auto removedSemibold = RemoveSemiboldFromName(familyName);
-
-	QFont originalFont(familyName);
-	QFont withoutSemiboldFont(removedSemibold);
-	withoutSemiboldFont.setStyleName("Semibold");
-
-	QFontInfo originalFontInfo(originalFont);
-	QFontInfo withoutSemiboldInfo(withoutSemiboldFont);
-
-	if (originalFontInfo.family().trimmed().compare(familyName, Qt::CaseInsensitive) &&
-		!withoutSemiboldInfo.family().trimmed().compare(removedSemibold, Qt::CaseInsensitive) &&
-		!withoutSemiboldInfo.styleName().trimmed().compare("Semibold", Qt::CaseInsensitive)) {
-		return true;
-	} else {
-		return false;
-	}
-}
-
-QString ParseFamilyName(const QString &familyName) {
-	if (IsRealSemibold(familyName)) {
-		return RemoveSemiboldFromName(familyName);
-	} else {
-		return familyName;
-	}
 }
 
 bool ValidateFont(const QString &familyName, int flags = 0) {
@@ -148,30 +122,6 @@ bool TryFont(const QString &attempt) {
 		}
 	}
 	return QString();
-}
-
-QString MonospaceFont() {
-	static const auto family = [&]() -> QString {
-		if (TryFont(CustomMonospaceFont)) {
-			return CustomMonospaceFont;
-		}
-
-		const auto manual = ManualMonospaceFont();
-		const auto system = SystemMonospaceFont();
-
-#if defined Q_OS_WIN || defined Q_OS_MAC
-		// Prefer our monospace font.
-		const auto useSystem = manual.isEmpty();
-#else // Q_OS_WIN || Q_OS_MAC
-		// Prefer system monospace font.
-		const auto metrics = QFontMetrics(QFont(system));
-		const auto useSystem = manual.isEmpty()
-			|| (metrics.charWidth("i", 0) == metrics.charWidth("W", 0));
-#endif // Q_OS_WIN || Q_OS_MAC
-		return (useSystem || UseSystemFont) ? system : manual;
-	}();
-
-	return family;
 }
 
 QFontMetrics GetFontMetrics(int size) {
@@ -355,6 +305,57 @@ QString GetFontOverride(int32 flags) {
 	return result.isEmpty() ? "Open Sans" : result;
 }
 
+bool IsRealSemibold(const QString &familyName) {
+	const auto removedSemibold = RemoveSemiboldFromName(familyName);
+
+	QFont originalFont(familyName);
+	QFont withoutSemiboldFont(removedSemibold);
+	withoutSemiboldFont.setStyleName("Semibold");
+
+	QFontInfo originalFontInfo(originalFont);
+	QFontInfo withoutSemiboldInfo(withoutSemiboldFont);
+
+	if (originalFontInfo.family().trimmed().compare(familyName, Qt::CaseInsensitive) &&
+		!withoutSemiboldInfo.family().trimmed().compare(removedSemibold, Qt::CaseInsensitive) &&
+		!withoutSemiboldInfo.styleName().trimmed().compare("Semibold", Qt::CaseInsensitive)) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+QString ParseFamilyName(const QString &familyName) {
+	if (IsRealSemibold(familyName)) {
+		return RemoveSemiboldFromName(familyName);
+	} else {
+		return familyName;
+	}
+}
+
+QString MonospaceFont() {
+	static const auto family = [&]() -> QString {
+		if (TryFont(CustomMonospaceFont)) {
+			return CustomMonospaceFont;
+		}
+
+		const auto manual = ManualMonospaceFont();
+		const auto system = SystemMonospaceFont();
+
+#if defined Q_OS_WIN || defined Q_OS_MAC
+		// Prefer our monospace font.
+		const auto useSystem = manual.isEmpty();
+#else // Q_OS_WIN || Q_OS_MAC
+		// Prefer system monospace font.
+		const auto metrics = QFontMetrics(QFont(system));
+		const auto useSystem = manual.isEmpty()
+			|| (metrics.charWidth("i", 0) == metrics.charWidth("W", 0));
+#endif // Q_OS_WIN || Q_OS_MAC
+		return (useSystem || UseSystemFont) ? system : manual;
+	}();
+
+	return family;
+}
+
 void destroyFonts() {
 	for (auto fontData : fontsMap) {
 		delete fontData;
@@ -373,63 +374,17 @@ int registerFontFamily(const QString &family) {
 }
 
 FontData::FontData(int size, uint32 flags, int family, Font *other)
-: m(f)
+: f(ResolveFont(flags, size))
+, m(f)
 , _size(size)
 , _flags(flags)
 , _family(family) {
-	const auto fontOverride = ParseFamilyName(GetFontOverride(flags));
-	const auto overrideIsEmpty = GetPossibleEmptyOverride(flags).isEmpty();
-
 	if (other) {
 		memcpy(modified, other, sizeof(modified));
 	} else {
 		memset(modified, 0, sizeof(modified));
 	}
 	modified[_flags] = Font(this);
-
-	if (_flags & FontMonospace) {
-		f.setFamily(MonospaceFont());
-	} else if (!UseSystemFont || !overrideIsEmpty) {
-		f.setFamily(fontOverride);
-	}
-
-	f.setPixelSize(size);
-	f.setItalic(_flags & FontItalic);
-	f.setUnderline(_flags & FontUnderline);
-	f.setStrikeOut(_flags & FontStrikeOut);
-
-	if ((_flags & FontBold) || (_flags & FontSemibold)) {
-		if (CustomSemiboldIsBold) {
-			f.setBold(true);
-#ifdef DESKTOP_APP_USE_PACKAGED_FONTS
-		} else {
-			f.setWeight(QFont::DemiBold);
-#else // DESKTOP_APP_USE_PACKAGED_FONTS
-		} else if (UseSystemFont) {
-			f.setWeight(QFont::DemiBold);
-		} else {
-			f.setBold(true);
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
-		}
-
-		if (!CustomSemiboldIsBold) {
-			if (_flags & FontItalic) {
-				f.setStyleName("Semibold Italic");
-			} else {
-				f.setStyleName("Semibold");
-			}
-		}
-	}
-
-	if (IsRealSemibold(fontOverride)) {
-		if (_flags & FontItalic) {
-			f.setStyleName("Semibold Italic");
-		} else {
-			f.setStyleName("Semibold");
-		}
-	}
-
-	m = QFontMetrics(f);
 
 	if (UseOriginalMetrics && !(_flags & FontMonospace)) {
 		const auto mOrig = GetFontMetrics(size);
