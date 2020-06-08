@@ -73,9 +73,9 @@ QFont ResolveFont(uint32 flags, int size) {
 
 		if (IsRealSemibold(fontOverride)) {
 			if (_flags & FontItalic) {
-				f.setStyleName("Semibold Italic");
+				result.setStyleName("Semibold Italic");
 			} else {
-				f.setStyleName("Semibold");
+				result.setStyleName("Semibold");
 			}
 		}
 	}
