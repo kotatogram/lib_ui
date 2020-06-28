@@ -1113,6 +1113,8 @@ PeerListItem {
 	height: pixels;
 	photoPosition: point;
 	namePosition: point;
+	chatNamePosition: point;
+	chatDescPosition: point;
 	nameStyle: TextStyle;
 	statusPosition: point;
 	photoSize: pixels;
