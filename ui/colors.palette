@@ -606,3 +606,33 @@ sideBarIconFgActive: #5eb5f7; // filters side bar active item icon
 sideBarBadgeBg: #5eb5f7; // filters side bar badge background
 sideBarBadgeBgMuted: #8393a3; // filters side bar unimportant badge background
 sideBarBadgeFg: #ffffff; // filters side bar badge text
+
+// kotatogram
+ktgTopBarBg: topBarBg; // Kotatogram: top bar background
+ktgTopBarNameFg: dialogsNameFg; // Kotatogram: top bar name text
+ktgTopBarStatusFg: windowSubTextFg; // Kotatogram: top bar status text
+ktgTopBarStatusFgActive: windowActiveTextFg; // Kotatogram: top bar online and typing status text
+
+ktgTopBarBackIconFg: boxTitleCloseFg; // Kotatogram: top bar back icon
+ktgTopBarBackIconFgOver: boxTitleCloseFgOver; // Kotatogram: top bar back icon with mouse over
+ktgTopBarBackIconBgRipple: windowBgOver; // Kotatogram: top bar back icon ripple effect
+
+ktgTopBarIconFg: menuIconFg; // Kotatogram: top bar icon (call, search, side panel, three dots)
+ktgTopBarIconFgOver: menuIconFgOver; // Kotatogram: top bar icon (call, search, side panel, three dots) with mouse over
+ktgTopBarIconFgActive: windowActiveTextFg; // Kotatogram: active top bar icon (call, search, side panel, three dots)
+ktgTopBarIconBgRipple: windowBgOver; // Kotatogram: top bar icon (call, search, side panel, three dots) ripple effect
+ktgTopBarIconBgActiveRipple: lightButtonBgOver; // Kotatogram: active top bar icon (call, search, side panel, three dots) ripple effect
+
+ktgTopBarActiveButtonFg: activeButtonFg; // Kotatogram: top bar active button text
+ktgTopBarActiveButtonFgOver: activeButtonFgOver; // Kotatogram: top bar active button text with mouse over
+ktgTopBarActiveButtonSecondaryFg: activeButtonSecondaryFg; // Kotatogram: top bar active button numbers text
+ktgTopBarActiveButtonSecondaryFgOver: activeButtonSecondaryFgOver; // Kotatogram: top bar active button numbers text with mouse over
+ktgTopBarActiveButtonBg: activeButtonBg; // Kotatogram: top bar active button background
+ktgTopBarActiveButtonBgOver: activeButtonBgOver; // Kotatogram: top bar active button background with mouse over
+ktgTopBarActiveButtonBgRipple: activeButtonBgRipple; // Kotatogram: top bar active button ripple effect
+
+ktgTopBarClearButtonFg: lightButtonFg; // Kotatogram: top bar clear button text
+ktgTopBarClearButtonFgOver: lightButtonFgOver; // Kotatogram: top bar clear button text with mouse over
+ktgTopBarClearButtonBg: lightButtonBg; // Kotatogram: top bar clear button background
+ktgTopBarClearButtonBgOver: lightButtonBgOver; // Kotatogram: top bar clear button background with mouse over
+ktgTopBarClearButtonBgRipple: lightButtonBgRipple; // Kotatogram: top bar clear button ripple effect
