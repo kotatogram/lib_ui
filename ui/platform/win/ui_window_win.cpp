@@ -10,6 +10,7 @@
 #include "ui/platform/win/ui_window_title_win.h"
 #include "base/platform/base_platform_info.h"
 #include "base/platform/win/base_windows_safe_library.h"
+#include "base/integration.h"
 #include "styles/palette.h"
 
 #include <QtCore/QAbstractNativeEventFilter>
@@ -31,6 +32,56 @@ bool IsCompositionEnabled() {
 	auto result = BOOL(FALSE);
 	const auto success = (DwmIsCompositionEnabled(&result) == S_OK);
 	return success && result;
+}
+
+HWND FindTaskbarWindow(LPRECT rcMon = nullptr) {
+	HWND hTaskbar = nullptr;
+	RECT rcTaskbar, rcMatch;
+
+	while ((hTaskbar = FindWindowEx(
+		nullptr,
+		hTaskbar,
+		L"Shell_TrayWnd",
+		nullptr)) != nullptr) {
+		if (!rcMon) {
+			break; // OK, return first found
+		}
+		if (GetWindowRect(hTaskbar, &rcTaskbar)
+			&& IntersectRect(&rcMatch, &rcTaskbar, rcMon)) {
+			break; // OK, taskbar match monitor
+		}
+	}
+
+	return hTaskbar;
+}
+
+bool IsTaskbarAutoHidden(LPRECT rcMon = nullptr, PUINT pEdge = nullptr) {
+	HWND hTaskbar = FindTaskbarWindow(rcMon);
+	if (!hTaskbar) {
+		if (pEdge) {
+			*pEdge = (UINT)-1;
+		}
+		return false;
+	}
+
+	APPBARDATA state = {sizeof(state), hTaskbar};
+	APPBARDATA pos = {sizeof(pos), hTaskbar};
+
+	LRESULT lState = SHAppBarMessage(ABM_GETSTATE, &state);
+	bool bAutoHidden = (lState & ABS_AUTOHIDE);
+
+	if (SHAppBarMessage(ABM_GETTASKBARPOS, &pos)) {
+		if (pEdge) {
+			*pEdge = pos.uEdge;
+		}
+	} else {
+		base::Integration::Instance().logMessage("Failed to get taskbar pos");
+		if (pEdge) {
+			*pEdge = ABE_BOTTOM;
+		}
+	}
+
+	return bAutoHidden;
 }
 
 HRESULT WinApiSetWindowTheme(
@@ -236,6 +287,15 @@ bool WindowHelper::handleNativeEvent(
 				mi.cbSize = sizeof(mi);
 				if (GetMonitorInfo(hMonitor, &mi)) {
 					*r = mi.rcWork;
+					UINT uEdge = (UINT)-1;
+					if (IsTaskbarAutoHidden(&mi.rcMonitor, &uEdge)) {
+						switch (uEdge) {
+						case ABE_LEFT: r->left += 1; break;
+						case ABE_RIGHT: r->right -= 1; break;
+						case ABE_TOP: r->top += 1; break;
+						case ABE_BOTTOM: r->bottom -= 1; break;
+						}
+					}
 				}
 			}
 		}
