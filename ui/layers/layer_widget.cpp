@@ -280,8 +280,8 @@ void LayerStackWidget::BackgroundWidget::paintEvent(QPaintEvent *e) {
 		// (alpha_final - alpha_current) / (1 - alpha_current) so we won't get glitches
 		// in the transparent special layer cache corners after filling special layer
 		// rect above its cache with alpha_current opacity.
-		auto region = QRegion(bg) - specialLayerBox;
-		for (auto rect : region.rects()) {
+		const auto region = QRegion(bg) - specialLayerBox;
+		for (const auto rect : region) {
 			p.fillRect(rect, st::layerBg);
 		}
 		p.setOpacity((bgOpacity - overSpecialOpacity) / (1. - (overSpecialOpacity * st::layerBg->c.alphaF())));
@@ -456,6 +456,13 @@ void LayerStackWidget::removeBodyCache() {
 
 bool LayerStackWidget::layerShown() const {
 	return _specialLayer || currentLayer() || _mainMenu;
+}
+
+void LayerStackWidget::setStyleOverrides(
+		const style::Box *boxSt,
+		const style::Box *layerSt) {
+	_boxSt = boxSt;
+	_layerSt = layerSt;
 }
 
 void LayerStackWidget::setCacheImages() {

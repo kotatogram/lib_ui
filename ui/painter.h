@@ -19,13 +19,13 @@ public:
 	void drawTextLeft(int x, int y, int outerw, const QString &text, int textWidth = -1) {
 		QFontMetrics m(fontMetrics());
 		auto ascent = (_ascent == 0 ? m.ascent() : _ascent);
-		if (style::RightToLeft() && textWidth < 0) textWidth = m.width(text);
+		if (style::RightToLeft() && textWidth < 0) textWidth = m.horizontalAdvance(text);
 		drawText(style::RightToLeft() ? (outerw - x - textWidth) : x, y + ascent, text);
 	}
 	void drawTextRight(int x, int y, int outerw, const QString &text, int textWidth = -1) {
 		QFontMetrics m(fontMetrics());
 		auto ascent = (_ascent == 0 ? m.ascent() : _ascent);
-		if (!style::RightToLeft() && textWidth < 0) textWidth = m.width(text);
+		if (!style::RightToLeft() && textWidth < 0) textWidth = m.horizontalAdvance(text);
 		drawText(style::RightToLeft() ? x : (outerw - x - textWidth), y + ascent, text);
 	}
 	void drawPixmapLeft(int x, int y, int outerw, const QPixmap &pix, const QRect &from) {
@@ -91,8 +91,7 @@ public:
 		static constexpr QPainter::RenderHint Hints[] = {
 			QPainter::Antialiasing,
 			QPainter::SmoothPixmapTransform,
-			QPainter::TextAntialiasing,
-			QPainter::HighQualityAntialiasing
+			QPainter::TextAntialiasing
 		};
 
 		const auto hints = _painter.renderHints();
@@ -119,6 +118,6 @@ public:
 
 private:
 	QPainter &_painter;
-	QPainter::RenderHints _hints = 0;
+	QPainter::RenderHints _hints;
 
 };
