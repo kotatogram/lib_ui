@@ -42,26 +42,13 @@ uint32 fontKey(int size, uint32 flags, int family) {
 	return (((uint32(family) << 12) | uint32(size)) << 6) | flags;
 }
 
-QString RemoveSemiboldFromName(const QString &familyName) {
-	auto removedSemibold = familyName;
-	removedSemibold.remove("Semibold", Qt::CaseInsensitive);
-	return removedSemibold.trimmed();
-}
-
 bool ValidateFont(const QString &familyName, int flags = 0) {
-	const auto parsedFamily = ParseFamilyName(familyName);
-
-	QFont checkFont(parsedFamily);
+	QFont checkFont(familyName);
 	checkFont.setBold(flags & style::internal::FontBold);
 	checkFont.setItalic(flags & style::internal::FontItalic);
 	checkFont.setUnderline(flags & style::internal::FontUnderline);
-
-	if (IsRealSemibold(familyName)) {
-		checkFont.setStyleName("Semibold");
-	}
-
 	auto realFamily = QFontInfo(checkFont).family();
-	if (realFamily.trimmed().compare(parsedFamily, Qt::CaseInsensitive)) {
+	if (realFamily.trimmed().compare(familyName, Qt::CaseInsensitive)) {
 		UI_LOG(("Font Error: could not resolve '%1' font, got '%2'.").arg(familyName).arg(realFamily));
 		return false;
 	}
@@ -303,33 +290,6 @@ QString GetPossibleEmptyOverride(int32 flags) {
 QString GetFontOverride(int32 flags) {
 	const auto result = GetPossibleEmptyOverride(flags);
 	return result.isEmpty() ? "Open Sans" : result;
-}
-
-bool IsRealSemibold(const QString &familyName) {
-	const auto removedSemibold = RemoveSemiboldFromName(familyName);
-
-	QFont originalFont(familyName);
-	QFont withoutSemiboldFont(removedSemibold);
-	withoutSemiboldFont.setStyleName("Semibold");
-
-	QFontInfo originalFontInfo(originalFont);
-	QFontInfo withoutSemiboldInfo(withoutSemiboldFont);
-
-	if (originalFontInfo.family().trimmed().compare(familyName, Qt::CaseInsensitive) &&
-		!withoutSemiboldInfo.family().trimmed().compare(removedSemibold, Qt::CaseInsensitive) &&
-		!withoutSemiboldInfo.styleName().trimmed().compare("Semibold", Qt::CaseInsensitive)) {
-		return true;
-	} else {
-		return false;
-	}
-}
-
-QString ParseFamilyName(const QString &familyName) {
-	if (IsRealSemibold(familyName)) {
-		return RemoveSemiboldFromName(familyName);
-	} else {
-		return familyName;
-	}
 }
 
 QString MonospaceFont() {
