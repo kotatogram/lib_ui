@@ -46,8 +46,10 @@ QFont ResolveFont(uint32 flags, int size) {
 			: sizes;
 		const auto point = good.isEmpty() ? size : good.front();
 		result = Database.font(custom.family, custom.style, point);
-	} else if (!UseSystemFont || !overrideIsEmpty) {
-		result.setFamily(fontOverride);
+	} else {
+		if (!UseSystemFont || !overrideIsEmpty) {
+			result.setFamily(fontOverride);
+		}
 		if (bold) {
 			if (CustomSemiboldIsBold) {
 				result.setBold(true);
