@@ -24,8 +24,6 @@ extern bool UseOriginalMetrics;
 void StartFonts();
 [[nodiscard]] QString GetPossibleEmptyOverride(int32 flags = 0);
 [[nodiscard]] QString GetFontOverride(int32 flags = 0);
-[[nodiscard]] bool IsRealSemibold(const QString &familyName);
-[[nodiscard]] QString ParseFamilyName(const QString &familyName);
 [[nodiscard]] QString MonospaceFont();
 
 void destroyFonts();

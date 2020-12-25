@@ -28,7 +28,6 @@ void SetCustomFonts(const CustomFont &regular, const CustomFont &bold) {
 QFont ResolveFont(uint32 flags, int size) {
 	static auto Database = QFontDatabase();
 
-	const auto fontOverride = ParseFamilyName(GetFontOverride(flags));
 	const auto overrideIsEmpty = GetPossibleEmptyOverride(flags).isEmpty();
 
 	const auto bold = ((flags & FontBold) || (flags & FontSemibold));
@@ -46,8 +45,10 @@ QFont ResolveFont(uint32 flags, int size) {
 			: sizes;
 		const auto point = good.isEmpty() ? size : good.front();
 		result = Database.font(custom.family, custom.style, point);
-	} else if (!UseSystemFont || !overrideIsEmpty) {
-		result.setFamily(fontOverride);
+	} else {
+		if (!UseSystemFont || !overrideIsEmpty) {
+			result.setFamily(GetFontOverride(flags));
+		}
 		if (bold) {
 			if (CustomSemiboldIsBold) {
 				result.setBold(true);
@@ -68,14 +69,6 @@ QFont ResolveFont(uint32 flags, int size) {
 				} else {
 					result.setStyleName("Semibold");
 				}
-			}
-		}
-
-		if (IsRealSemibold(fontOverride)) {
-			if (flags & FontItalic) {
-				result.setStyleName("Semibold Italic");
-			} else {
-				result.setStyleName("Semibold");
 			}
 		}
 	}
