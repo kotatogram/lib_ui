@@ -256,6 +256,9 @@ void StartFonts() {
 	if (!CustomSemiboldFont.isEmpty() && ValidateFont(CustomSemiboldFont)) {
 		Overrides[FontTypeSemibold] = CustomSemiboldFont;
 		Overrides[FontTypeSemiboldItalic] = CustomSemiboldFont;
+	} else if (!CustomMainFont.isEmpty() && ValidateFont(CustomMainFont)) {
+		Overrides[FontTypeSemibold] = CustomMainFont;
+		Overrides[FontTypeSemiboldItalic] = CustomMainFont;
 	}
 
 	auto appFont = QApplication::font();
