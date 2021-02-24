@@ -69,12 +69,16 @@ PRIVATE
     ui/layers/layer_manager.h
     ui/layers/layer_widget.cpp
     ui/layers/layer_widget.h
+    ui/paint/arcs.cpp
+    ui/paint/arcs.h
     ui/paint/blob.cpp
     ui/paint/blob.h
     ui/paint/blobs.cpp
     ui/paint/blobs.h
     ui/paint/blobs_linear.cpp
     ui/paint/blobs_linear.h
+    ui/platform/linux/ui_linux_wayland_integration.cpp
+    ui/platform/linux/ui_linux_wayland_integration.h
     ui/platform/linux/ui_window_linux.cpp
     ui/platform/linux/ui_window_linux.h
     ui/platform/linux/ui_utility_linux.cpp
@@ -93,8 +97,11 @@ PRIVATE
     ui/platform/win/ui_window_win.h
     ui/platform/win/ui_utility_win.cpp
     ui/platform/win/ui_utility_win.h
+    ui/platform/ui_platform_window_title.cpp
+    ui/platform/ui_platform_window_title.h
     ui/platform/ui_platform_window.cpp
     ui/platform/ui_platform_window.h
+    ui/platform/ui_platform_utility.cpp
     ui/platform/ui_platform_utility.h
     ui/style/style_core.cpp
     ui/style/style_core.h
@@ -146,8 +153,18 @@ PRIVATE
     ui/widgets/input_fields.h
     ui/widgets/labels.cpp
     ui/widgets/labels.h
-    ui/widgets/menu.cpp
-    ui/widgets/menu.h
+    ui/widgets/menu/menu.cpp
+    ui/widgets/menu/menu.h
+    ui/widgets/menu/menu_action.cpp
+    ui/widgets/menu/menu_action.h
+    ui/widgets/menu/menu_common.cpp
+    ui/widgets/menu/menu_common.h
+    ui/widgets/menu/menu_item_base.cpp
+    ui/widgets/menu/menu_item_base.h
+    ui/widgets/menu/menu_separator.cpp
+    ui/widgets/menu/menu_separator.h
+    ui/widgets/menu/menu_toggle.cpp
+    ui/widgets/menu/menu_toggle.h
     ui/widgets/popup_menu.cpp
     ui/widgets/popup_menu.h
     ui/widgets/scroll_area.cpp
@@ -214,6 +231,11 @@ endif()
 
 if (NOT DESKTOP_APP_USE_PACKAGED_FONTS)
     nice_target_sources(lib_ui ${src_loc} PRIVATE fonts/fonts.qrc)
+endif()
+
+if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
+    remove_target_sources(Telegram ${src_loc} ui/platform/linux/ui_linux_wayland_integration.cpp)
+    nice_target_sources(Telegram ${src_loc} PRIVATE ui/platform/linux/ui_linux_wayland_integration_dummy.cpp)
 endif()
 
 target_include_directories(lib_ui
