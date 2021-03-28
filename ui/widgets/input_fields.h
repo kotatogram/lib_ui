@@ -85,13 +85,13 @@ public:
 		return _oldtext;
 	}
 
-public slots:
+public Q_SLOTS:
 	void onTextChange(const QString &text);
 	void onTextEdited();
 
 	void onTouchTimer();
 
-signals:
+Q_SIGNALS:
 	void changed();
 	void cancelled();
 	void submitted(Qt::KeyboardModifiers);
@@ -338,7 +338,7 @@ public:
 
 	~InputField();
 
-private slots:
+private Q_SLOTS:
 	void onTouchTimer();
 
 	void onDocumentContentsChange(int position, int charsRemoved, int charsAdded);
@@ -349,7 +349,7 @@ private slots:
 
 	void onFocusInner();
 
-signals:
+Q_SIGNALS:
 	void changed();
 	void submitted(Qt::KeyboardModifiers);
 	void cancelled();
@@ -589,7 +589,7 @@ public:
 		startPlaceholderAnimation();
 	}
 
-public slots:
+public Q_SLOTS:
 	void onTextChange(const QString &text);
 	void onCursorPositionChanged(int oldPosition, int position);
 
@@ -597,7 +597,7 @@ public slots:
 
 	void onTouchTimer();
 
-signals:
+Q_SIGNALS:
 	void changed();
 	void cancelled();
 	void submitted(Qt::KeyboardModifiers);
