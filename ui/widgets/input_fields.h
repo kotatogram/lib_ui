@@ -191,6 +191,7 @@ public:
 
 	void showError();
 	void showErrorNoFocus();
+	void hideError();
 
 	void setMaxLength(int maxLength);
 	void setMinHeight(int minHeight);
@@ -559,6 +560,8 @@ public:
 		const QString &val = QString());
 
 	void showError();
+	void showErrorNoFocus();
+	void hideError();
 
 	QRect getTextRect() const;
 

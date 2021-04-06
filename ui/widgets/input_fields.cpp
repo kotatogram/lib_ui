@@ -3598,6 +3598,10 @@ void InputField::showErrorNoFocus() {
 	setErrorShown(true);
 }
 
+void InputField::hideError() {
+	setErrorShown(false);
+}
+
 void InputField::setErrorShown(bool error) {
 	if (_error != error) {
 		_error = error;
@@ -3915,10 +3919,18 @@ void MaskedInputField::inputMethodEvent(QInputMethodEvent *e) {
 }
 
 void MaskedInputField::showError() {
-	setErrorShown(true);
+	showErrorNoFocus();
 	if (!hasFocus()) {
 		setFocus();
 	}
+}
+
+void MaskedInputField::showErrorNoFocus() {
+	setErrorShown(true);
+}
+
+void MaskedInputField::hideError() {
+	setErrorShown(false);
 }
 
 void MaskedInputField::setErrorShown(bool error) {
