@@ -35,14 +35,10 @@ public:
 	virtual void registerLeaveSubscription(not_null<QWidget*> widget) = 0;
 	virtual void unregisterLeaveSubscription(not_null<QWidget*> widget) = 0;
 
-	virtual void writeLogEntry(const QString &entry) = 0;
 	[[nodiscard]] virtual QString emojiCacheFolder() = 0;
 
 	virtual void textActionsUpdated();
 	virtual void activationFromTopPanel();
-
-	virtual void startFontsBegin();
-	virtual void startFontsEnd();
 
 	[[nodiscard]] virtual QString timeFormat();
 
@@ -55,8 +51,6 @@ public:
 	[[nodiscard]] virtual QString convertTagToMimeTag(const QString &tagId);
 	[[nodiscard]] virtual const Emoji::One *defaultEmojiVariant(
 		const Emoji::One *emoji);
-
-	[[nodiscard]] virtual QWidget *modalWindowParent();
 
 	[[nodiscard]] virtual rpl::producer<> forcePopupMenuHideRequests();
 

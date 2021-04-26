@@ -36,12 +36,6 @@ void Integration::textActionsUpdated() {
 void Integration::activationFromTopPanel() {
 }
 
-void Integration::startFontsBegin() {
-}
-
-void Integration::startFontsEnd() {
-}
-
 QString Integration::timeFormat() {
 	return u"hh:mm"_q;
 }
@@ -77,10 +71,6 @@ QString Integration::convertTagToMimeTag(const QString &tagId) {
 
 const Emoji::One *Integration::defaultEmojiVariant(const Emoji::One *emoji) {
 	return emoji;
-}
-
-QWidget *Integration::modalWindowParent() {
-	return nullptr;
 }
 
 rpl::producer<> Integration::forcePopupMenuHideRequests() {
