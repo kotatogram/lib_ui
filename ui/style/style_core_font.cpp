@@ -179,13 +179,6 @@ QString Overrides[FontTypesCount];
 
 } // namespace
 
-QString CustomMainFont;
-QString CustomSemiboldFont;
-QString CustomMonospaceFont;
-bool CustomSemiboldIsBold = false;
-bool UseSystemFont = false;
-bool UseOriginalMetrics = false;
-
 void StartFonts() {
 	if (Started) {
 		return;
@@ -194,8 +187,10 @@ void StartFonts() {
 
 	style_InitFontsResource();
 
+	const auto fontSettings = Ui::Integration::Instance().fontSettings();
+
 #ifndef DESKTOP_APP_USE_PACKAGED_FONTS
-	if (!UseSystemFont) {
+	if (!fontSettings.useSystemFont) {
 		bool areGood[FontTypesCount] = { false };
 		for (auto i = 0; i != FontTypesCount; ++i) {
 			const auto file = FontTypeFiles[i];
@@ -242,18 +237,18 @@ void StartFonts() {
 	}
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 
-	if (!CustomMainFont.isEmpty() && ValidateFont(CustomMainFont)) {
-		Overrides[FontTypeRegular] = CustomMainFont;
-		Overrides[FontTypeRegularItalic] = CustomMainFont;
-		Overrides[FontTypeBold] = CustomMainFont;
-		Overrides[FontTypeBoldItalic] = CustomMainFont;
+	if (!fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
+		Overrides[FontTypeRegular] = fontSettings.mainFont;
+		Overrides[FontTypeRegularItalic] = fontSettings.mainFont;
+		Overrides[FontTypeBold] = fontSettings.mainFont;
+		Overrides[FontTypeBoldItalic] = fontSettings.mainFont;
 	}
-	if (!CustomSemiboldFont.isEmpty() && ValidateFont(CustomSemiboldFont)) {
-		Overrides[FontTypeSemibold] = CustomSemiboldFont;
-		Overrides[FontTypeSemiboldItalic] = CustomSemiboldFont;
-	} else if (!CustomMainFont.isEmpty() && ValidateFont(CustomMainFont)) {
-		Overrides[FontTypeSemibold] = CustomMainFont;
-		Overrides[FontTypeSemiboldItalic] = CustomMainFont;
+	if (!fontSettings.semiboldFont.isEmpty() && ValidateFont(fontSettings.semiboldFont)) {
+		Overrides[FontTypeSemibold] = fontSettings.semiboldFont;
+		Overrides[FontTypeSemiboldItalic] = fontSettings.semiboldFont;
+	} else if (fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
+		Overrides[FontTypeSemibold] = fontSettings.mainFont;
+		Overrides[FontTypeSemiboldItalic] = fontSettings.mainFont;
 	}
 
 	auto appFont = QApplication::font();
@@ -288,8 +283,10 @@ QString GetFontOverride(int32 flags) {
 
 QString MonospaceFont() {
 	static const auto family = [&]() -> QString {
-		if (TryFont(CustomMonospaceFont)) {
-			return CustomMonospaceFont;
+		const auto fontSettings = Ui::Integration::Instance().fontSettings();
+
+		if (TryFont(fontSettings.monospaceFont)) {
+			return fontSettings.monospaceFont;
 		}
 
 		const auto manual = ManualMonospaceFont();
@@ -304,7 +301,7 @@ QString MonospaceFont() {
 		const auto useSystem = manual.isEmpty()
 			|| (metrics.horizontalAdvance(QChar('i')) == metrics.horizontalAdvance(QChar('W')));
 #endif // Q_OS_WIN || Q_OS_MAC
-		return (useSystem || UseSystemFont) ? system : manual;
+		return (useSystem || fontSettings.useSystemFont) ? system : manual;
 	}();
 
 	return family;
@@ -340,7 +337,8 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	}
 	modified[_flags] = Font(this);
 
-	if (UseOriginalMetrics && !(_flags & FontMonospace)) {
+	const auto fontSettings = Ui::Integration::Instance().fontSettings();
+	if (fontSettings.useOriginalMetrics && !(_flags & FontMonospace)) {
 		const auto mOrig = GetFontMetrics(size);
 
 		height = mOrig.height();

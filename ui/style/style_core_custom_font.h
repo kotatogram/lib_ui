@@ -13,6 +13,15 @@ struct CustomFont {
 	QString style;
 };
 
+struct CustomFontSettings {
+	QString mainFont;
+	QString semiboldFont;
+	QString monospaceFont;
+	bool semiboldIsBold = false;
+	bool useSystemFont = false;
+	bool useOriginalMetrics = false;
+};
+
 inline bool operator==(const CustomFont &a, const CustomFont &b) {
 	return (a.family == b.family) && (a.style == b.style);
 }

@@ -7,6 +7,7 @@
 #include "ui/style/style_core_custom_font.h"
 
 #include "ui/style/style_core_font.h"
+#include "ui/integration.h"
 
 #include <QFontDatabase>
 
@@ -46,24 +47,25 @@ QFont ResolveFont(uint32 flags, int size) {
 		const auto point = good.isEmpty() ? size : good.front();
 		result = Database.font(custom.family, custom.style, point);
 	} else {
-		if (!UseSystemFont || !overrideIsEmpty) {
+		const auto fontSettings = Ui::Integration::Instance().fontSettings();
+		if (!fontSettings.useSystemFont || !overrideIsEmpty) {
 			result.setFamily(GetFontOverride(flags));
 		}
 		if (bold) {
-			if (CustomSemiboldIsBold) {
+			if (fontSettings.semiboldIsBold) {
 				result.setBold(true);
 #ifdef DESKTOP_APP_USE_PACKAGED_FONTS
 			} else {
 				result.setWeight(QFont::DemiBold);
 #else // DESKTOP_APP_USE_PACKAGED_FONTS
-			} else if (UseSystemFont) {
+			} else if (fontSettings.useSystemFont) {
 				result.setWeight(QFont::DemiBold);
 			} else {
 				result.setBold(true);
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 			}
 
-			if (!CustomSemiboldIsBold) {
+			if (!fontSettings.semiboldIsBold) {
 				if (flags & FontItalic) {
 					result.setStyleName("Semibold Italic");
 				} else {

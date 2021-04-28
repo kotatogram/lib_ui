@@ -10,6 +10,7 @@
 #include "ui/text/text.h"
 #include "ui/emoji_config.h"
 #include "ui/ui_utility.h"
+#include "ui/style/style_core_custom_font.h"
 #include "base/openssl_help.h"
 #include "base/platform/base_platform_info.h"
 #include "emoji_suggestions_helper.h"
@@ -1306,7 +1307,8 @@ InputField::InputField(
 	_inner->viewport()->setAutoFillBackground(false);
 
 	_inner->setContentsMargins(0, 0, 0, 0);
-	if (style::internal::UseOriginalMetrics) {
+	const auto fontSettings = Integration::Instance().fontSettings();
+	if (fontSettings.useOriginalMetrics) {
 		const auto heightDelta = (_st.font->height - _st.font->m.height());
 		const auto topMargin = (_st.font->ascent - _st.font->m.ascent())
 			+ (heightDelta ? heightDelta / 2 : 0);
@@ -1721,7 +1723,8 @@ void InputField::paintEvent(QPaintEvent *e) {
 				auto r = rect().marginsRemoved(_st.textMargins + _st.placeholderMargins);
 				r.moveLeft(r.left() + placeholderLeft);
 				if (style::RightToLeft()) r.moveLeft(width() - r.left() - r.width());
-				if (style::internal::UseOriginalMetrics) {
+				const auto fontSettings = Integration::Instance().fontSettings();
+				if (fontSettings.useOriginalMetrics) {
 					if (_mode == Mode::SingleLine) {
 						const auto heightDelta = (_st.placeholderFont->height - _st.placeholderFont->m.height());
 						const auto topMargin = (_st.placeholderFont->ascent - _st.placeholderFont->m.ascent())
