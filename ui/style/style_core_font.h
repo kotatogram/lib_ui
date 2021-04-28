@@ -14,13 +14,6 @@
 namespace style {
 namespace internal {
 
-extern QString CustomMainFont;
-extern QString CustomSemiboldFont;
-extern QString CustomMonospaceFont;
-extern bool CustomSemiboldIsBold;
-extern bool UseSystemFont;
-extern bool UseOriginalMetrics;
-
 void StartFonts();
 [[nodiscard]] QString GetPossibleEmptyOverride(int32 flags = 0);
 [[nodiscard]] QString GetFontOverride(int32 flags = 0);
