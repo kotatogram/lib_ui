@@ -246,7 +246,7 @@ void StartFonts() {
 	if (!fontSettings.semiboldFont.isEmpty() && ValidateFont(fontSettings.semiboldFont)) {
 		Overrides[FontTypeSemibold] = fontSettings.semiboldFont;
 		Overrides[FontTypeSemiboldItalic] = fontSettings.semiboldFont;
-	} else if (fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
+	} else if (!fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
 		Overrides[FontTypeSemibold] = fontSettings.mainFont;
 		Overrides[FontTypeSemiboldItalic] = fontSettings.mainFont;
 	}
