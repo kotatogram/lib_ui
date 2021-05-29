@@ -29,6 +29,7 @@ void SetCustomFonts(const CustomFont &regular, const CustomFont &bold) {
 QFont ResolveFont(uint32 flags, int size) {
 	static auto Database = QFontDatabase();
 
+	const auto fontSettings = Ui::Integration::Instance().fontSettings();
 	const auto overrideIsEmpty = GetPossibleEmptyOverride(flags).isEmpty();
 
 	const auto bold = ((flags & FontBold) || (flags & FontSemibold));
@@ -47,7 +48,6 @@ QFont ResolveFont(uint32 flags, int size) {
 		const auto point = good.isEmpty() ? size : good.front();
 		result = Database.font(custom.family, custom.style, point);
 	} else {
-		const auto fontSettings = Ui::Integration::Instance().fontSettings();
 		if (!fontSettings.useSystemFont || !overrideIsEmpty) {
 			result.setFamily(GetFontOverride(flags));
 		}
@@ -80,7 +80,7 @@ QFont ResolveFont(uint32 flags, int size) {
 
 	result.setUnderline(flags & FontUnderline);
 	result.setStrikeOut(flags & FontStrikeOut);
-	result.setPixelSize(size);
+	result.setPixelSize(size + fontSettings.fontSize);
 
 	return result;
 }
