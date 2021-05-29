@@ -17,6 +17,7 @@ struct CustomFontSettings {
 	QString mainFont;
 	QString semiboldFont;
 	QString monospaceFont;
+	int fontSize = 0;
 	bool semiboldIsBold = false;
 	bool useSystemFont = false;
 	bool useOriginalMetrics = false;
