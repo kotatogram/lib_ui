@@ -56,11 +56,11 @@ enum class InputSubmitSettings {
 	None,
 };
 
-class FlatInput : public RpWidgetWrap<QLineEdit> {
+class FlatInput : public RpWidgetBase<QLineEdit> {
 	// The Q_OBJECT meta info is used for qobject_cast!
 	Q_OBJECT
 
-	using Parent = RpWidgetWrap<QLineEdit>;
+	using Parent = RpWidgetBase<QLineEdit>;
 public:
 	FlatInput(
 		QWidget *parent,
@@ -258,7 +258,10 @@ public:
 		EditLinkSelection selection,
 		const QString &text,
 		const QString &link);
-	static bool IsValidMarkdownLink(const QString &link);
+	static bool IsValidMarkdownLink(const QStringRef &link);
+	static bool IsValidMarkdownLink(const QString &link) {
+		return IsValidMarkdownLink(link.midRef(0));
+	}
 
 	const QString &getLastText() const {
 		return _lastTextWithTags.text;
@@ -452,6 +455,12 @@ private:
 		int till,
 		const QString &tag,
 		const QString &edge = QString());
+	void addMarkdownTag(int from, int till, const QString &tag);
+	void removeMarkdownTag(int from, int till, const QString &tag);
+	void finishMarkdownTagChange(
+		int from,
+		int till,
+		const TextWithTags &textWithTags);
 	void toggleSelectionMarkdown(const QString &tag);
 	void clearSelectionMarkdown();
 
@@ -547,11 +556,11 @@ private:
 
 };
 
-class MaskedInputField : public RpWidgetWrap<QLineEdit> {
+class MaskedInputField : public RpWidgetBase<QLineEdit> {
 	// The Q_OBJECT meta info is used for qobject_cast!
 	Q_OBJECT
 
-	using Parent = RpWidgetWrap<QLineEdit>;
+	using Parent = RpWidgetBase<QLineEdit>;
 public:
 	MaskedInputField(
 		QWidget *parent,

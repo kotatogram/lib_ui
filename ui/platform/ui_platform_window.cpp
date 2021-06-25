@@ -52,6 +52,10 @@ void BasicWindowHelper::setFixedSize(QSize size) {
 	_window->setFixedSize(size);
 }
 
+void BasicWindowHelper::setStaysOnTop(bool enabled) {
+	_window->setWindowFlag(Qt::WindowStaysOnTopHint, enabled);
+}
+
 void BasicWindowHelper::setGeometry(QRect rect) {
 	_window->setGeometry(rect);
 }
@@ -239,28 +243,36 @@ QMargins DefaultWindowHelper::resizeArea() const {
 
 Qt::Edges DefaultWindowHelper::edgesFromPos(const QPoint &pos) const {
 	const auto area = resizeArea();
+	const auto ignoreHorizontal = (window()->minimumWidth()
+		== window()->maximumWidth());
+	const auto ignoreVertical = (window()->minimumHeight()
+		== window()->maximumHeight());
 
 	if (area.isNull()) {
 		return Qt::Edges();
-	} else if (pos.x() <= area.left()) {
-		if (pos.y() <= area.top()) {
+	} else if (!ignoreHorizontal && pos.x() <= area.left()) {
+		if (!ignoreVertical && pos.y() <= area.top()) {
 			return Qt::LeftEdge | Qt::TopEdge;
-		} else if (pos.y() >= (window()->height() - area.bottom())) {
+		} else if (!ignoreVertical
+			&& pos.y() >= (window()->height() - area.bottom())) {
 			return Qt::LeftEdge | Qt::BottomEdge;
 		}
 
 		return Qt::LeftEdge;
-	} else if (pos.x() >= (window()->width() - area.right())) {
-		if (pos.y() <= area.top()) {
+	} else if (!ignoreHorizontal
+		&& pos.x() >= (window()->width() - area.right())) {
+		if (!ignoreVertical && pos.y() <= area.top()) {
 			return Qt::RightEdge | Qt::TopEdge;
-		} else if (pos.y() >= (window()->height() - area.bottom())) {
+		} else if (!ignoreVertical
+			&& pos.y() >= (window()->height() - area.bottom())) {
 			return Qt::RightEdge | Qt::BottomEdge;
 		}
 
 		return Qt::RightEdge;
-	} else if (pos.y() <= area.top()) {
+	} else if (!ignoreVertical && pos.y() <= area.top()) {
 		return Qt::TopEdge;
-	} else if (pos.y() >= (window()->height() - area.bottom())) {
+	} else if (!ignoreVertical
+		&& pos.y() >= (window()->height() - area.bottom())) {
 		return Qt::BottomEdge;
 	}
 
@@ -389,7 +401,7 @@ void DefaultWindowHelper::updateCursor(Qt::Edges edges) {
 	} else if ((edges & Qt::TopEdge) || (edges & Qt::BottomEdge)) {
 		window()->setCursor(QCursor(Qt::SizeVerCursor));
 	} else {
-		window()->unsetCursor();
+		window()->setCursor(QCursor(Qt::ArrowCursor));
 	}
 }
 

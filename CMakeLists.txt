@@ -57,6 +57,20 @@ PRIVATE
     ui/effects/ripple_animation.h
     ui/effects/slide_animation.cpp
     ui/effects/slide_animation.h
+    ui/gl/gl_detection.cpp
+    ui/gl/gl_detection.h
+    ui/gl/gl_image.cpp
+    ui/gl/gl_image.h
+    ui/gl/gl_math.cpp
+    ui/gl/gl_math.h
+    ui/gl/gl_primitives.cpp
+    ui/gl/gl_primitives.h
+    ui/gl/gl_shader.cpp
+    ui/gl/gl_shader.h
+    ui/gl/gl_surface.cpp
+    ui/gl/gl_surface.h
+    ui/gl/gl_window.cpp
+    ui/gl/gl_window.h
     ui/image/image_prepare.cpp
     ui/image/image_prepare.h
     ui/layers/box_content.cpp
@@ -119,7 +133,6 @@ PRIVATE
     ui/style/style_core_scale.h
     ui/style/style_core_types.cpp
     ui/style/style_core_types.h
-    ui/text/qtextitemint.cpp
     ui/text/text.cpp
     ui/text/text.h
     ui/text/text_block.cpp
@@ -221,7 +234,9 @@ PRIVATE
     emoji_suggestions/emoji_suggestions_helper.h
 )
 
-if (NOT DESKTOP_APP_USE_PACKAGED)
+if (DESKTOP_APP_USE_PACKAGED)
+    nice_target_sources(lib_ui ${src_loc} PRIVATE ui/text/qtextitemint.cpp)
+else()
     nice_target_sources(lib_ui ${src_loc} PRIVATE qt_conf/linux.qrc)
 endif()
 
@@ -232,6 +247,11 @@ endif()
 if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
     remove_target_sources(Telegram ${src_loc} ui/platform/linux/ui_linux_wayland_integration.cpp)
     nice_target_sources(Telegram ${src_loc} PRIVATE ui/platform/linux/ui_linux_wayland_integration_dummy.cpp)
+elseif(LINUX)
+    target_link_libraries(lib_ui
+    PUBLIC
+        desktop-app::lib_waylandshells
+    )
 endif()
 
 target_include_directories(lib_ui
