@@ -91,11 +91,11 @@ void Image::bind(QOpenGLFunctions &f) {
 			f.glTexImage2D(
 				GL_TEXTURE_2D,
 				0,
-				GL_RGBA,
+				kFormatRGBA,
 				_subimage.width(),
 				_subimage.height(),
 				0,
-				GL_RGBA,
+				kFormatRGBA,
 				GL_UNSIGNED_BYTE,
 				_image.constBits());
 		} else {
@@ -106,7 +106,7 @@ void Image::bind(QOpenGLFunctions &f) {
 				0,
 				_subimage.width(),
 				_subimage.height(),
-				GL_RGBA,
+				kFormatRGBA,
 				GL_UNSIGNED_BYTE,
 				_image.constBits());
 		}
@@ -153,6 +153,16 @@ TexturedRect Image::texturedRect(
 			usedTexture.width() / dimensions.width(),
 			usedTexture.height() / dimensions.height())),
 	};
+}
+
+GLint CurrentSingleComponentFormat() {
+	const auto context = QOpenGLContext::currentContext();
+	Assert(context != nullptr);
+
+	const auto format = context->format();
+	return (format.renderableType() == QSurfaceFormat::OpenGLES)
+		? GL_LUMINANCE
+		: GL_RED;
 }
 
 } // namespace Ui::GL
