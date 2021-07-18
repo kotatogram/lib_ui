@@ -9,6 +9,7 @@
 #include "ui/style/style_core_font.h"
 #include "ui/integration.h"
 
+#include <QGuiApplication>
 #include <QFontDatabase>
 
 namespace style {
@@ -37,7 +38,7 @@ QFont ResolveFont(uint32 flags, int size) {
 	const auto &custom = bold ? BoldFont : RegularFont;
 	const auto useCustom = !custom.family.isEmpty();
 
-	auto result = QFont();
+	auto result = QFont(QGuiApplication::font().family());
 	if (flags & FontMonospace) {
 		result.setFamily(MonospaceFont());
 	} else if (useCustom) {
