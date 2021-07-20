@@ -191,7 +191,7 @@ void StartFonts() {
 
 #ifndef DESKTOP_APP_USE_PACKAGED_FONTS
 	if (!fontSettings.useSystemFont) {
-		bool areGood[FontTypesCount] = { false };
+		[[maybe_unused]] bool areGood[FontTypesCount] = { false };
 		for (auto i = 0; i != FontTypesCount; ++i) {
 			const auto file = FontTypeFiles[i];
 			const auto name = FontTypeNames[i];
