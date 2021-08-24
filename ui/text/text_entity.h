@@ -74,6 +74,9 @@ public:
 		_offset -= extent;
 		_length += extent;
 	}
+	void extendToRight(int extent) {
+		_length += extent;
+	}
 	void shrinkFromRight(int shrink) {
 		_length -= shrink;
 	}
