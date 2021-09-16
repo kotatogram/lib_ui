@@ -24,6 +24,7 @@ public:
 	not_null<RpWidget*> body() override;
 	void setTitle(const QString &title) override;
 	void setTitleStyle(const style::WindowTitle &st) override;
+	void setNativeFrame(bool enabled) override;
 	void setMinimumSize(QSize size) override;
 	void setFixedSize(QSize size) override;
 	void setGeometry(QRect rect) override;
@@ -38,6 +39,8 @@ private:
 	void updateMargins();
 	void updateSystemMenu();
 	void updateSystemMenu(Qt::WindowState state);
+	void initialShadowUpdate();
+	void fixMaximizedWindow();
 	[[nodiscard]] bool handleNativeEvent(
 		UINT msg,
 		WPARAM wParam,
@@ -45,12 +48,13 @@ private:
 		LRESULT *result);
 	[[nodiscard]] bool fixedSize() const;
 
+	[[nodiscard]] int titleHeight() const;
 	static not_null<NativeFilter*> GetNativeFilter();
 
 	const HWND _handle = nullptr;
 	const not_null<TitleWidget*> _title;
 	const not_null<RpWidget*> _body;
-	WindowShadow _shadow;
+	std::optional<WindowShadow> _shadow;
 	bool _updatingMargins = false;
 	QMargins _marginsDelta;
 	HMENU _menu = nullptr;

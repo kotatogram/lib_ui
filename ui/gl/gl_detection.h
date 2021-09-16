@@ -8,6 +8,8 @@
 
 #include "base/flags.h"
 
+class QOpenGLContext;
+
 namespace Ui::GL {
 
 enum class Backend {
@@ -39,5 +41,8 @@ enum class ANGLE {
 void ConfigureANGLE(); // Requires Ui::Integration being set.
 void ChangeANGLE(ANGLE backend);
 [[nodiscard]] ANGLE CurrentANGLE();
+
+[[nodiscard]] QList<QByteArray> EGLExtensions(
+	not_null<QOpenGLContext*> context);
 
 } // namespace Ui::GL

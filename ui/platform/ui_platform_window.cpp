@@ -8,7 +8,7 @@
 
 #include "ui/platform/ui_platform_window_title.h"
 #include "ui/platform/ui_platform_utility.h"
-#include "ui/widgets/window.h"
+#include "ui/widgets/rp_window.h"
 #include "ui/widgets/shadow.h"
 #include "ui/painter.h"
 #include "styles/style_widgets.h"
@@ -42,6 +42,9 @@ void BasicWindowHelper::setTitle(const QString &title) {
 }
 
 void BasicWindowHelper::setTitleStyle(const style::WindowTitle &st) {
+}
+
+void BasicWindowHelper::setNativeFrame(bool enabled) {
 }
 
 void BasicWindowHelper::setMinimumSize(QSize size) {
@@ -143,14 +146,21 @@ DefaultWindowHelper::DefaultWindowHelper(not_null<RpWidget*> window)
 }
 
 void DefaultWindowHelper::init() {
+	_title->show();
 	window()->setWindowFlag(Qt::FramelessWindowHint);
 
 	if (WindowExtentsSupported()) {
 		window()->setAttribute(Qt::WA_TranslucentBackground);
 	}
 
-	window()->widthValue(
-	) | rpl::start_with_next([=](int width) {
+	rpl::combine(
+		window()->widthValue(),
+		_windowState.value(),
+		_title->shownValue()
+	) | rpl::start_with_next([=](
+			int width,
+			Qt::WindowStates windowState,
+			bool shown) {
 		const auto area = resizeArea();
 		_title->setGeometry(
 			area.left(),
@@ -161,17 +171,23 @@ void DefaultWindowHelper::init() {
 
 	rpl::combine(
 		window()->sizeValue(),
-		_title->heightValue()
-	) | rpl::start_with_next([=](QSize size, int titleHeight) {
+		_windowState.value(),
+		_title->heightValue(),
+		_title->shownValue()
+	) | rpl::start_with_next([=](
+			QSize size,
+			Qt::WindowStates windowState,
+			int titleHeight,
+			bool titleShown) {
 		const auto area = resizeArea();
 
 		const auto sizeWithoutMargins = size
-			.shrunkBy({ 0, titleHeight, 0, 0 })
+			.shrunkBy({ 0, titleShown ? titleHeight : 0, 0, 0 })
 			.shrunkBy(area);
 
 		const auto topLeft = QPoint(
 			area.left(),
-			area.top() + titleHeight);
+			area.top() + (titleShown ? titleHeight : 0));
 
 		_body->setGeometry(QRect(topLeft, sizeWithoutMargins));
 	}, _body->lifetime());
@@ -197,8 +213,10 @@ void DefaultWindowHelper::init() {
 		}
 	}, window()->lifetime());
 
-	window()->shownValue(
-	) | rpl::start_with_next([=](bool shown) {
+	rpl::combine(
+		window()->shownValue(),
+		_windowState.value()
+	) | rpl::start_with_next([=](bool shown, Qt::WindowStates windowState) {
 		if (shown) {
 			updateWindowExtents();
 		}
@@ -213,10 +231,8 @@ void DefaultWindowHelper::init() {
 			if (mouseEvent->button() == Qt::LeftButton && edges) {
 				window()->windowHandle()->startSystemResize(edges);
 			}
-		} else if (e->type() == QEvent::Move
-			|| e->type() == QEvent::Resize
-			|| e->type() == QEvent::WindowStateChange) {
-			updateWindowExtents();
+		} else if (e->type() == QEvent::WindowStateChange) {
+			_windowState = window()->windowState();
 		}
 	}, window()->lifetime());
 
@@ -233,7 +249,9 @@ bool DefaultWindowHelper::hasShadow() const {
 }
 
 QMargins DefaultWindowHelper::resizeArea() const {
-	if (window()->isMaximized() || window()->isFullScreen()) {
+	if (window()->isMaximized()
+		|| window()->isFullScreen()
+		|| _title->isHidden()) {
 		return QMargins();
 	}
 
@@ -282,7 +300,7 @@ bool DefaultWindowHelper::eventFilter(QObject *obj, QEvent *e) {
 	// doesn't work with RpWidget::events() for some reason
 	if (e->type() == QEvent::MouseMove
 		&& obj->isWidgetType()
-		&& static_cast<QWidget*>(window()) == static_cast<QWidget*>(obj)) {
+		&& window()->isAncestorOf(static_cast<QWidget*>(obj))) {
 		const auto mouseEvent = static_cast<QMouseEvent*>(e);
 		const auto currentPoint = mouseEvent->windowPos().toPoint();
 		const auto edges = edgesFromPos(currentPoint);
@@ -310,25 +328,25 @@ void DefaultWindowHelper::setTitleStyle(const style::WindowTitle &st) {
 		_title->st()->height);
 }
 
+void DefaultWindowHelper::setNativeFrame(bool enabled) {
+	window()->windowHandle()->setFlag(Qt::FramelessWindowHint, !enabled);
+	_title->setVisible(!enabled);
+	updateWindowExtents();
+}
+
 void DefaultWindowHelper::setMinimumSize(QSize size) {
-	const auto sizeWithMargins = size
-		.grownBy({ 0, _title->height(), 0, 0 })
-		.grownBy(resizeArea());
+	const auto sizeWithMargins = size.grownBy(bodyPadding());
 	window()->setMinimumSize(sizeWithMargins);
 }
 
 void DefaultWindowHelper::setFixedSize(QSize size) {
-	const auto sizeWithMargins = size
-		.grownBy({ 0, _title->height(), 0, 0 })
-		.grownBy(resizeArea());
+	const auto sizeWithMargins = size.grownBy(bodyPadding());
 	window()->setFixedSize(sizeWithMargins);
 	_title->setResizeEnabled(false);
 }
 
 void DefaultWindowHelper::setGeometry(QRect rect) {
-	window()->setGeometry(rect
-		.marginsAdded({ 0, _title->height(), 0, 0 })
-		.marginsAdded(resizeArea()));
+	window()->setGeometry(rect.marginsAdded(bodyPadding()));
 }
 
 void DefaultWindowHelper::paintBorders(QPainter &p) {
@@ -376,7 +394,7 @@ void DefaultWindowHelper::paintBorders(QPainter &p) {
 }
 
 void DefaultWindowHelper::updateWindowExtents() {
-	if (hasShadow()) {
+	if (hasShadow() && !_title->isHidden()) {
 		Platform::SetWindowExtents(
 			window()->windowHandle(),
 			resizeArea());
@@ -386,6 +404,14 @@ void DefaultWindowHelper::updateWindowExtents() {
 		Platform::UnsetWindowExtents(window()->windowHandle());
 		_extentsSet = false;
 	}
+}
+
+int DefaultWindowHelper::titleHeight() const {
+	return _title->isHidden() ? 0 : _title->height();
+}
+
+QMargins DefaultWindowHelper::bodyPadding() const {
+	return resizeArea() + QMargins{ 0, titleHeight(), 0, 0 };
 }
 
 void DefaultWindowHelper::updateCursor(Qt::Edges edges) {
