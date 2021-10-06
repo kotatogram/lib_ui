@@ -7,6 +7,7 @@
 #include "ui/style/style_core_custom_font.h"
 
 #include "ui/style/style_core_font.h"
+#include "ui/style/style_core_scale.h"
 #include "ui/integration.h"
 
 #include <QGuiApplication>
@@ -81,7 +82,7 @@ QFont ResolveFont(uint32 flags, int size) {
 
 	result.setUnderline(flags & FontUnderline);
 	result.setStrikeOut(flags & FontStrikeOut);
-	result.setPixelSize(size + fontSettings.fontSize);
+	result.setPixelSize(size + ConvertScale(fontSettings.fontSize));
 
 	return result;
 }
