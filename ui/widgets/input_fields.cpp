@@ -959,6 +959,17 @@ const InstantReplaces &InstantReplaces::TextOnly() {
 	return result;
 }
 
+const InstantReplaces &InstantReplaces::Custom() {
+	static const auto result = [] {
+		auto result = InstantReplaces();
+		for (auto i = customReplacesMap.constBegin(), e = customReplacesMap.constEnd(); i != e; ++i) {
+			result.add(i.key(), i.value());
+		}
+		return result;
+	}();
+	return result;
+}
+
 FlatInput::FlatInput(
 	QWidget *parent,
 	const style::FlatInput &st,

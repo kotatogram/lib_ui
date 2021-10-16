@@ -43,6 +43,7 @@ struct InstantReplaces {
 
 	static const InstantReplaces &Default();
 	static const InstantReplaces &TextOnly();
+	static const InstantReplaces &Custom();
 
 	int maxLength = 0;
 	Node reverseMap;
