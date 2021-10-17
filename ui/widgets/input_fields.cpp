@@ -1484,6 +1484,14 @@ void InputField::setInstantReplaces(const InstantReplaces &replaces) {
 	_mutableInstantReplaces = replaces;
 }
 
+void InputField::setInstantReplaces(rpl::producer<InstantReplaces> producer) {
+	std::move(
+		producer
+	) | rpl::start_with_next([=](InstantReplaces replaces) {
+		_mutableInstantReplaces = replaces;
+	}, lifetime());
+}
+
 void InputField::setInstantReplacesEnabled(rpl::producer<bool> enabled) {
 	std::move(
 		enabled

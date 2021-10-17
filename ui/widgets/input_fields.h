@@ -251,6 +251,7 @@ public:
 	void setAdditionalMargin(int margin);
 
 	void setInstantReplaces(const InstantReplaces &replaces);
+	void setInstantReplaces(rpl::producer<InstantReplaces> producer);
 	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<bool> enabled);
 	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
