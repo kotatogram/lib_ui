@@ -30,9 +30,7 @@ void style_InitFontsResource() {
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 #ifdef Q_OS_WIN
 	Q_INIT_RESOURCE(win);
-#elif defined Q_OS_UNIX && !defined DESKTOP_APP_USE_PACKAGED // Q_OS_WIN
-	Q_INIT_RESOURCE(linux);
-#endif // Q_OS_WIN || (Q_OS_UNIX && !DESKTOP_APP_USE_PACKAGED)
+#endif // Q_OS_WIN
 
 #endif // Q_OS_MAC
 }
@@ -341,8 +339,6 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 , _family(family) {
 	if (other) {
 		memcpy(modified, other, sizeof(modified));
-	} else {
-		memset(modified, 0, sizeof(modified));
 	}
 	modified[_flags] = Font(this);
 
