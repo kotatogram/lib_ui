@@ -8,6 +8,7 @@
 
 #include "ui/platform/mac/ui_window_title_mac.h"
 #include "ui/widgets/rp_window.h"
+#include "base/qt_adapters.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/palette.h"
 
@@ -15,7 +16,7 @@
 #include <QtCore/QAbstractNativeEventFilter>
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
-#include <QtWidgets/QOpenGLWidget>
+#include <QOpenGLWidget>
 #include <Cocoa/Cocoa.h>
 
 @interface WindowObserver : NSObject {
@@ -84,24 +85,35 @@ private:
 
 class EventFilter : public QObject, public QAbstractNativeEventFilter {
 public:
-	EventFilter(not_null<QObject*> parent, Fn<bool(void*)> checkPerformDrag)
+	EventFilter(
+		not_null<QObject*> parent,
+		Fn<bool()> checkStartDrag,
+		Fn<bool(void*)> checkPerformDrag)
 	: QObject(parent)
+	, _checkStartDrag(std::move(checkStartDrag))
 	, _checkPerformDrag(std::move(checkPerformDrag)) {
 		Expects(_checkPerformDrag != nullptr);
+		Expects(_checkStartDrag != nullptr);
 	}
 
 	bool nativeEventFilter(
 			const QByteArray &eventType,
 			void *message,
-			long *result) {
-		NSEvent *e = static_cast<NSEvent*>(message);
-		return (e && [e type] == NSEventTypeLeftMouseDown)
-			? _checkPerformDrag([e window])
-			: false;
+			base::NativeEventResult *result) {
+		if (NSEvent *e = static_cast<NSEvent*>(message)) {
+			if ([e type] == NSEventTypeLeftMouseDown) {
+				_dragStarted = _checkStartDrag();
+			} else if (([e type] == NSEventTypeLeftMouseDragged)
+					&& _dragStarted) {
+				return _checkPerformDrag([e window]);
+			}
+		}
 		return false;
 	}
 
 private:
+	bool _dragStarted = false;
+	Fn<bool()> _checkStartDrag;
 	Fn<bool(void*)> _checkPerformDrag;
 
 };
@@ -361,7 +373,10 @@ void WindowHelper::setGeometry(QRect rect) {
 
 void WindowHelper::setupBodyTitleAreaEvents() {
 	const auto controls = _private->controlsRect();
-	qApp->installNativeEventFilter(new EventFilter(window(), [=](void *nswindow) {
+	qApp->installNativeEventFilter(new EventFilter(window(), [=] {
+		const auto point = body()->mapFromGlobal(QCursor::pos());
+		return (bodyTitleAreaHit(point) & WindowTitleHitTestFlag::Move);
+	}, [=](void *nswindow) {
 		const auto point = body()->mapFromGlobal(QCursor::pos());
 		if (_private->checkNativeMove(nswindow)
 			&& !controls.contains(point)
@@ -398,6 +413,15 @@ void WindowHelper::init() {
 			size.width(),
 			size.height() - titleHeight);
 	}, _body->lifetime());
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	setBodyTitleArea([](QPoint widgetPoint) {
+		using Flag = Ui::WindowTitleHitTestFlag;
+		return (widgetPoint.y() < 0)
+			? (Flag::Move | Flag::Maximize)
+			: Flag::None;
+	});
+#endif // Qt >= 6.0.0
 }
 
 std::unique_ptr<BasicWindowHelper> CreateSpecialWindowHelper(

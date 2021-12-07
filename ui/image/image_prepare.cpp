@@ -878,6 +878,53 @@ QImage GenerateLinearGradient(
 	return result;
 }
 
+QImage GenerateShadow(
+		int height,
+		int topAlpha,
+		int bottomAlpha,
+		QColor color) {
+	Expects(topAlpha >= 0 && topAlpha < 256);
+	Expects(bottomAlpha >= 0 && bottomAlpha < 256);
+	Expects(height * style::DevicePixelRatio() < 65536);
+
+	const auto base = (uint32(color.red()) << 16)
+		| (uint32(color.green()) << 8)
+		| uint32(color.blue());
+	const auto premultiplied = (topAlpha == bottomAlpha) || !base;
+	auto result = QImage(
+		QSize(1, height * style::DevicePixelRatio()),
+		(premultiplied
+			? QImage::Format_ARGB32_Premultiplied
+			: QImage::Format_ARGB32));
+	if (topAlpha == bottomAlpha) {
+		color.setAlpha(topAlpha);
+		result.fill(color);
+		return result;
+	}
+	constexpr auto kShift = 16;
+	constexpr auto kMultiply = (1U << kShift);
+	const auto values = std::abs(topAlpha - bottomAlpha);
+	const auto rows = uint32(result.height());
+	const auto step = (values * kMultiply) / (rows - 1);
+	const auto till = rows * uint32(step);
+	Assert(result.bytesPerLine() == sizeof(uint32));
+	auto ints = reinterpret_cast<uint32*>(result.bits());
+	if (topAlpha < bottomAlpha) {
+		for (auto i = uint32(0); i != till; i += step) {
+			*ints++ = base | ((topAlpha + (i >> kShift)) << 24);
+		}
+	} else {
+		for (auto i = uint32(0); i != till; i += step) {
+			*ints++ = base | ((topAlpha - (i >> kShift)) << 24);
+		}
+	}
+	if (!premultiplied) {
+		result = std::move(result).convertToFormat(
+			QImage::Format_ARGB32_Premultiplied);
+	}
+	return result;
+}
+
 void prepareCircle(QImage &img) {
 	Assert(!img.isNull());
 
@@ -893,7 +940,7 @@ void prepareCircle(QImage &img) {
 
 void prepareRound(
 		QImage &image,
-		QImage *cornerMasks,
+		gsl::span<const QImage, 4> cornerMasks,
 		RectParts corners,
 		QRect target) {
 	if (target.isNull()) {
@@ -905,7 +952,7 @@ void prepareRound(
 	auto cornerHeight = cornerMasks[0].height();
 	auto targetWidth = target.width();
 	auto targetHeight = target.height();
-	if (targetWidth < 2 * cornerWidth || targetHeight < 2 * cornerHeight) {
+	if (targetWidth < cornerWidth || targetHeight < cornerHeight) {
 		return;
 	}
 
@@ -970,8 +1017,8 @@ void prepareRound(
 		QImage::Format_ARGB32_Premultiplied);
 	Assert(!image.isNull());
 
-	auto masks = CornersMask(radius);
-	prepareRound(image, masks.data(), corners, target);
+	const auto masks = CornersMask(radius);
+	prepareRound(image, masks, corners, target);
 }
 
 QImage prepareColored(style::color add, QImage image) {

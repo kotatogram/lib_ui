@@ -22,7 +22,10 @@ InnerDropdown::InnerDropdown(
 , _roundRect(ImageRoundRadius::Small, _st.bg)
 , _hideTimer([=] { hideAnimated(); })
 , _scroll(this, _st.scroll) {
-	connect(_scroll, &ScrollArea::scrolled, [=] { scrolled(); });
+	_scroll->scrolls(
+	) | rpl::start_with_next([=] {
+		scrolled();
+	}, lifetime());
 
 	hide();
 
@@ -126,7 +129,7 @@ void InnerDropdown::paintEvent(QPaintEvent *e) {
 	}
 }
 
-void InnerDropdown::enterEventHook(QEvent *e) {
+void InnerDropdown::enterEventHook(QEnterEvent *e) {
 	if (_autoHiding) {
 		showAnimated(_origin);
 	}

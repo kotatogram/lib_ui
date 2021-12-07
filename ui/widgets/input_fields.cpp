@@ -16,6 +16,7 @@
 #include "base/platform/base_platform_info.h"
 #include "emoji_suggestions_helper.h"
 #include "styles/palette.h"
+#include "base/qt_adapters.h"
 
 #include <QtWidgets/QCommonStyle>
 #include <QtWidgets/QScrollBar>
@@ -103,7 +104,7 @@ bool IsNewline(QChar ch) {
 	return (kNewlineChars.indexOf(ch) >= 0);
 }
 
-[[nodiscard]] bool IsValidMarkdownLink(const QStringRef &link) {
+[[nodiscard]] bool IsValidMarkdownLink(QStringView link) {
 	return (link.indexOf('.') >= 0) || (link.indexOf(':') >= 0);
 }
 
@@ -128,21 +129,21 @@ bool IsNewline(QChar ch) {
 			return QString();
 		}
 		auto found = false;
-		for (const auto &single : existing.id.splitRef('|')) {
-			const auto normalized = (single == kTagPre.midRef(0))
-				? kTagCode.midRef(0)
+		for (const auto &single : QStringView(existing.id).split('|')) {
+			const auto normalized = (single == QStringView(kTagPre))
+				? QStringView(kTagCode)
 				: single;
 			if (checkingLink && IsValidMarkdownLink(single)) {
 				if (resultLink.isEmpty()) {
 					resultLink = single.toString();
 					found = true;
 					break;
-				} else if (resultLink.midRef(0) == single) {
+				} else if (QStringView(resultLink) == single) {
 					found = true;
 					break;
 				}
 				return QString();
-			} else if (!checkingLink && tag.midRef(0) == normalized) {
+			} else if (!checkingLink && QStringView(tag) == normalized) {
 				found = true;
 				break;
 			}
@@ -687,7 +688,8 @@ void RemoveDocumentTags(
 		not_null<QTextDocument*> document,
 		int from,
 		int end) {
-	auto cursor = QTextCursor(document->docHandle(), from);
+	auto cursor = QTextCursor(document);
+	cursor.setPosition(from);
 	cursor.setPosition(end, QTextCursor::KeepAnchor);
 
 	auto format = QTextCharFormat();
@@ -704,7 +706,7 @@ QTextCharFormat PrepareTagFormat(
 	auto result = QTextCharFormat();
 	auto font = st.font;
 	auto color = std::optional<style::color>();
-	const auto applyOne = [&](const QStringRef &tag) {
+	const auto applyOne = [&](QStringView tag) {
 		if (IsValidMarkdownLink(tag)) {
 			color = st::defaultTextPalette.linkFg;
 		} else if (tag == kTagBold) {
@@ -720,7 +722,7 @@ QTextCharFormat PrepareTagFormat(
 			font = font->monospace();
 		}
 	};
-	for (const auto &tag : tag.splitRef('|')) {
+	for (const auto &tag : QStringView(tag).split('|')) {
 		applyOne(tag);
 	}
 	result.setFont(font);
@@ -764,7 +766,7 @@ int ProcessInsertedTags(
 					applyNoTagFrom,
 					tagFrom);
 			}
-			QTextCursor c(document->docHandle(), 0);
+			QTextCursor c(document);
 			c.setPosition(tagFrom);
 			c.setPosition(tagTo, QTextCursor::KeepAnchor);
 
@@ -1024,7 +1026,7 @@ bool FlatInput::eventHook(QEvent *e) {
 		|| e->type() == QEvent::TouchEnd
 		|| e->type() == QEvent::TouchCancel) {
 		const auto ev = static_cast<QTouchEvent*>(e);
-		if (ev->device()->type() == QTouchDevice::TouchScreen) {
+		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
 			touchEvent(ev);
 		}
 	}
@@ -1057,6 +1059,8 @@ void FlatInput::touchEvent(QTouchEvent *e) {
 			if (_touchRightButton) {
 				QContextMenuEvent contextEvent(QContextMenuEvent::Mouse, mapped, _touchStart);
 				contextMenuEvent(&contextEvent);
+			} else {
+				QGuiApplication::inputMethod()->show();
 			}
 		}
 		if (weak) {
@@ -1402,7 +1406,7 @@ bool InputField::viewportEventInner(QEvent *e) {
 		|| e->type() == QEvent::TouchEnd
 		|| e->type() == QEvent::TouchCancel) {
 		const auto ev = static_cast<QTouchEvent*>(e);
-		if (ev->device()->type() == QTouchDevice::TouchScreen) {
+		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
 			handleTouchEvent(ev);
 		}
 	}
@@ -1465,7 +1469,7 @@ void InputField::setExtendedContextMenu(
 		value
 	) | rpl::start_with_next([=](auto pair) {
 		auto &[menu, e] = pair;
-		contextMenuEventInner(&e, std::move(menu));
+		contextMenuEventInner(e.get(), std::move(menu));
 	}, lifetime());
 }
 
@@ -1514,14 +1518,14 @@ void InputField::setMaxLength(int length) {
 		if (_maxLength > 0) {
 			const auto document = _inner->document();
 			_correcting = true;
-			QTextCursor(document->docHandle(), 0).joinPreviousEditBlock();
+			QTextCursor(document).joinPreviousEditBlock();
 			const auto guard = gsl::finally([&] {
 				_correcting = false;
-				QTextCursor(document->docHandle(), 0).endEditBlock();
+				QTextCursor(document).endEditBlock();
 				handleContentsChanged();
 			});
 
-			auto cursor = QTextCursor(document->docHandle(), 0);
+			auto cursor = QTextCursor(document);
 			cursor.movePosition(QTextCursor::End);
 			chopByMaxLength(0, cursor.position());
 		}
@@ -1610,7 +1614,7 @@ void InputField::insertTag(const QString &text, QString tagId) {
 		cursor.insertText(text + ' ', _defaultCharFormat);
 	} else {
 		_insertedTags.clear();
-		_insertedTags.push_back({ 0, text.size(), tagId });
+		_insertedTags.push_back({ 0, int(text.size()), tagId });
 		_insertedTagsAreFromMime = false;
 		cursor.insertText(text + ' ');
 		_insertedTags.clear();
@@ -1673,6 +1677,8 @@ void InputField::handleTouchEvent(QTouchEvent *e) {
 			if (_touchRightButton) {
 				QContextMenuEvent contextEvent(QContextMenuEvent::Mouse, mapped, _touchStart);
 				contextMenuEvent(&contextEvent);
+			} else {
+				QGuiApplication::inputMethod()->show();
 			}
 		}
 		if (weak) {
@@ -2220,9 +2226,8 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 		if (action.type != ActionType::Invalid) {
 			PrepareFormattingOptimization(document);
 
-			auto cursor = QTextCursor(
-				document->docHandle(),
-				action.intervalStart);
+			auto cursor = QTextCursor(document);
+			cursor.setPosition(action.intervalStart);
 			cursor.setPosition(action.intervalEnd, QTextCursor::KeepAnchor);
 			if (action.type == ActionType::InsertEmoji) {
 				InsertEmojiAtCursor(cursor, action.emoji);
@@ -2290,7 +2295,7 @@ void InputField::onDocumentContentsChange(
 
 	// Qt bug workaround https://bugreports.qt.io/browse/QTBUG-49062
 	if (!position) {
-		auto cursor = QTextCursor(document->docHandle(), 0);
+		auto cursor = QTextCursor(document);
 		cursor.movePosition(QTextCursor::End);
 		if (position + charsAdded > cursor.position()) {
 			const auto delta = position + charsAdded - cursor.position();
@@ -2309,10 +2314,10 @@ void InputField::onDocumentContentsChange(
 		: charsAdded;
 
 	_correcting = true;
-	QTextCursor(document->docHandle(), 0).joinPreviousEditBlock();
+	QTextCursor(document).joinPreviousEditBlock();
 	const auto guard = gsl::finally([&] {
 		_correcting = false;
-		QTextCursor(document->docHandle(), 0).endEditBlock();
+		QTextCursor(document).endEditBlock();
 		handleContentsChanged();
 		const auto added = charsAdded - _emojiSurrogateAmount;
 		_documentContentsChanges.fire({position, charsRemoved, added});
@@ -2345,7 +2350,7 @@ void InputField::chopByMaxLength(int insertPosition, int insertLength) {
 		return;
 	}
 
-	auto cursor = QTextCursor(document()->docHandle(), 0);
+	auto cursor = QTextCursor(document());
 	cursor.movePosition(QTextCursor::End);
 	const auto fullSize = cursor.position();
 	const auto toRemove = fullSize - _maxLength;
@@ -2540,7 +2545,7 @@ void InputField::setTextWithTags(
 	_realInsertPosition = 0;
 	_realCharsAdded = textWithTags.text.size();
 	const auto document = _inner->document();
-	auto cursor = QTextCursor(document->docHandle(), 0);
+	auto cursor = QTextCursor(document);
 	if (historyAction == HistoryAction::Clear) {
 		document->setUndoRedoEnabled(false);
 		cursor.beginEditBlock();
@@ -2597,7 +2602,7 @@ TextWithTags InputField::getTextWithAppliedMarkdown() const {
 	auto from = 0;
 	const auto addOriginalTextUpTill = [&](int offset) {
 		if (offset > from) {
-			result.text.append(originalText.midRef(from, offset - from));
+			result.text.append(base::StringViewMid(originalText, from, offset - from));
 		}
 	};
 	auto link = links.begin();
@@ -2653,7 +2658,8 @@ TextWithTags InputField::getTextWithAppliedMarkdown() const {
 				int(result.text.size()),
 				entityLength,
 				tag.tag });
-			result.text.append(originalText.midRef(
+			result.text.append(base::StringViewMid(
+				originalText,
 				entityStart,
 				entityLength));
 		}
@@ -2928,7 +2934,8 @@ auto InputField::selectionEditLinkData(EditLinkSelection selection) const
 	};
 	const auto stateTagHasLink = [&](const State &state) {
 		const auto tag = stateTag(state);
-		return (tag == link) || tag.splitRef('|').contains(link.midRef(0));
+		return (tag == link) || QStringView(tag).split('|').contains(
+			QStringView(link));
 	};
 	const auto stateStart = [&](const State &state) {
 		return state.i.fragment().position();
@@ -3136,9 +3143,9 @@ void InputField::commitInstantReplacement(
 		const auto currentTag = cursor.charFormat().property(
 			kTagProperty
 		).toString();
-		const auto currentTags = currentTag.splitRef('|');
-		if (currentTags.contains(kTagPre.midRef(0))
-			|| currentTags.contains(kTagCode.midRef(0))) {
+		const auto currentTags = QStringView(currentTag).split('|');
+		if (currentTags.contains(QStringView(kTagPre))
+			|| currentTags.contains(QStringView(kTagCode))) {
 			return;
 		}
 	}
@@ -3173,7 +3180,7 @@ bool InputField::commitMarkdownReplacement(
 		const QString &tag,
 		const QString &edge) {
 	const auto end = [&] {
-		auto cursor = QTextCursor(document()->docHandle(), 0);
+		auto cursor = QTextCursor(document());
 		cursor.movePosition(QTextCursor::End);
 		return cursor.position();
 	}();
@@ -3187,7 +3194,8 @@ bool InputField::commitMarkdownReplacement(
 	const auto extended = getTextWithTagsPart(
 		from - extendLeft,
 		till + extendRight).text;
-	const auto outer = extended.midRef(
+	const auto outer = base::StringViewMid(
+		extended,
 		extendLeft,
 		extended.size() - extendLeft - extendRight);
 	if ((outer.size() <= 2 * edge.size())
@@ -3251,7 +3259,7 @@ bool InputField::commitMarkdownReplacement(
 	if (tagTill > tagFrom) {
 		_insertedTags.push_back({
 			tagFrom,
-			tagTill - tagFrom,
+			int(tagTill - tagFrom),
 			tag,
 		});
 	}
@@ -3283,8 +3291,7 @@ void InputField::addMarkdownTag(
 		int till,
 		const QString &tag) {
 	const auto current = getTextWithTagsPart(from, till);
-	const auto currentLength = current.text.size();
-	const auto tagRef = tag.midRef(0);
+	const auto currentLength = int(current.text.size());
 
 	// #TODO Trim inserted tag, so that all newlines are left outside.
 	auto tags = TagList();
@@ -3322,7 +3329,6 @@ void InputField::removeMarkdownTag(
 		int till,
 		const QString &tag) {
 	const auto current = getTextWithTagsPart(from, till);
-	const auto tagRef = tag.midRef(0);
 
 	auto tags = TagList();
 	for (const auto &existing : current.tags) {
@@ -3351,7 +3357,7 @@ void InputField::finishMarkdownTagChange(
 	_inner->setTextCursor(cursor);
 }
 
-bool InputField::IsValidMarkdownLink(const QStringRef &link) {
+bool InputField::IsValidMarkdownLink(QStringView link) {
 	return ::Ui::IsValidMarkdownLink(link);
 }
 
@@ -3365,7 +3371,7 @@ void InputField::commitMarkdownLinkEdit(
 		return;
 	}
 	_insertedTags.clear();
-	_insertedTags.push_back({ 0, text.size(), link });
+	_insertedTags.push_back({ 0, int(text.size()), link });
 
 	auto cursor = textCursor();
 	const auto editData = selectionEditLinkData(selection);
@@ -3852,7 +3858,7 @@ bool MaskedInputField::eventHook(QEvent *e) {
 		|| type == QEvent::TouchEnd
 		|| type == QEvent::TouchCancel) {
 		auto event = static_cast<QTouchEvent*>(e);
-		if (event->device()->type() == QTouchDevice::TouchScreen) {
+		if (event->device()->type() == base::TouchDevice::TouchScreen) {
 			touchEvent(event);
 		}
 	}
@@ -3885,6 +3891,8 @@ void MaskedInputField::touchEvent(QTouchEvent *e) {
 			if (_touchRightButton) {
 				QContextMenuEvent contextEvent(QContextMenuEvent::Mouse, mapped, _touchStart);
 				contextMenuEvent(&contextEvent);
+			} else {
+				QGuiApplication::inputMethod()->show();
 			}
 		}
 		if (weak) {
@@ -4212,7 +4220,7 @@ void NumberInput::correctValue(
 	QString newText;
 	newText.reserve(now.size());
 	auto newPos = nowCursor;
-	for (auto i = 0, l = now.size(); i < l; ++i) {
+	for (auto i = 0, l = int(now.size()); i < l; ++i) {
 		if (now.at(i).isDigit()) {
 			newText.append(now.at(i));
 		} else if (i < nowCursor) {
@@ -4248,7 +4256,7 @@ void HexInput::correctValue(
 	QString newText;
 	newText.reserve(now.size());
 	auto newPos = nowCursor;
-	for (auto i = 0, l = now.size(); i < l; ++i) {
+	for (auto i = 0, l = int(now.size()); i < l; ++i) {
 		const auto ch = now[i];
 		if ((ch >= '0' && ch <= '9')
 			|| (ch >= 'a' && ch <= 'f')

@@ -40,6 +40,12 @@ namespace Images {
 	const std::vector<QColor> &colors,
 	int rotation = 0);
 
+[[nodiscard]] QImage GenerateShadow(
+	int height,
+	int topAlpha,
+	int bottomAlpha,
+	QColor color = QColor(0, 0, 0));
+
 [[nodiscard]] const std::array<QImage, 4> &CornersMask(
 	ImageRoundRadius radius);
 [[nodiscard]] std::array<QImage, 4> PrepareCorners(
@@ -81,7 +87,7 @@ void prepareRound(
 	QRect target = QRect());
 void prepareRound(
 	QImage &image,
-	QImage *cornerMasks,
+	gsl::span<const QImage, 4> cornerMasks,
 	RectParts corners = RectPart::AllCorners,
 	QRect target = QRect());
 void prepareCircle(QImage &image);
