@@ -240,13 +240,15 @@ void StartFonts() {
 	if (!fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
 		Overrides[FontTypeRegular] = fontSettings.mainFont;
 		Overrides[FontTypeRegularItalic] = fontSettings.mainFont;
-		Overrides[FontTypeBold] = fontSettings.mainFont;
-		Overrides[FontTypeBoldItalic] = fontSettings.mainFont;
 	}
 	if (!fontSettings.semiboldFont.isEmpty() && ValidateFont(fontSettings.semiboldFont)) {
+		Overrides[FontTypeBold] = fontSettings.semiboldFont;
+		Overrides[FontTypeBoldItalic] = fontSettings.semiboldFont;
 		Overrides[FontTypeSemibold] = fontSettings.semiboldFont;
 		Overrides[FontTypeSemiboldItalic] = fontSettings.semiboldFont;
 	} else if (!fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
+		Overrides[FontTypeBold] = fontSettings.mainFont;
+		Overrides[FontTypeBoldItalic] = fontSettings.mainFont;
 		Overrides[FontTypeSemibold] = fontSettings.mainFont;
 		Overrides[FontTypeSemiboldItalic] = fontSettings.mainFont;
 	}
