@@ -673,3 +673,6 @@ ktgTopBarClearButtonFgOver: lightButtonFgOver; // Kotatogram: top bar clear butt
 ktgTopBarClearButtonBg: lightButtonBg; // Kotatogram: top bar clear button background
 ktgTopBarClearButtonBgOver: lightButtonBgOver; // Kotatogram: top bar clear button background with mouse over
 ktgTopBarClearButtonBgRipple: lightButtonBgRipple; // Kotatogram: top bar clear button ripple effect
+
+ktgMessageNameIconFg: historyPeer4NameFg; // Kotatogram: icon near sender name in a message
+ktgMessageNameIconFgSelected: ktgMessageNameIconFg; // Kotatogram: icon near sender name in a selected message
