@@ -144,4 +144,8 @@ QString Integration::phraseFormattingMonospace() {
 	return "Monospace";
 }
 
+QString Integration::phraseFormattingSpoiler() {
+	return "Spoiler";
+}
+
 } // namespace Ui

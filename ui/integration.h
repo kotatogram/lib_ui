@@ -76,6 +76,7 @@ public:
 	[[nodiscard]] virtual QString phraseFormattingUnderline();
 	[[nodiscard]] virtual QString phraseFormattingStrikeOut();
 	[[nodiscard]] virtual QString phraseFormattingMonospace();
+	[[nodiscard]] virtual QString phraseFormattingSpoiler();
 
 };
 
