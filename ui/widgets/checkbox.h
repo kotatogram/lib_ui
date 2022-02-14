@@ -122,6 +122,9 @@ public:
 	QImage prepareRippleMask() const override;
 	bool checkRippleStartPosition(QPoint position) const override;
 	void setLocked(bool locked);
+	bool isLocked() {
+		return _locked;
+	}
 
 private:
 	void paintXV(Painter &p, int left, int top, int outerWidth, float64 toggled, const QBrush &brush);
@@ -202,6 +205,10 @@ public:
 		rtlupdate(checkRect());
 	}
 	QRect checkRect() const;
+
+	not_null<AbstractCheckView*> checkView() const {
+		return _check.get();
+	}
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
