@@ -33,6 +33,8 @@ struct InputField;
 
 namespace Ui {
 
+void AddCustomReplacement(QString from, QString to);
+
 const auto kClearFormatSequence = QKeySequence("ctrl+shift+n");
 const auto kStrikeOutSequence = QKeySequence("ctrl+shift+x");
 const auto kBlockquoteSequence = QKeySequence("ctrl+shift+.");
@@ -60,6 +62,7 @@ struct InstantReplaces {
 
 	static const InstantReplaces &Default();
 	static const InstantReplaces &TextOnly();
+	static const InstantReplaces &Custom();
 
 	int maxLength = 0;
 	Node reverseMap;
@@ -225,6 +228,7 @@ public:
 	void setAdditionalMargins(QMargins margins);
 
 	void setInstantReplaces(const InstantReplaces &replaces);
+	void setInstantReplaces(rpl::producer<InstantReplaces> producer);
 	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<bool> enabled);
 	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
