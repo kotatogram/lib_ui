@@ -11,6 +11,7 @@
 #include "ui/emoji_config.h"
 #include "ui/ui_utility.h"
 #include "ui/painter.h"
+#include "ui/style/style_core_custom_font.h"
 #include "base/invoke_queued.h"
 #include "base/random.h"
 #include "base/platform/base_platform_info.h"
@@ -1233,6 +1234,14 @@ InputField::InputField(
 	_inner->viewport()->setAutoFillBackground(false);
 
 	_inner->setContentsMargins(0, 0, 0, 0);
+	const auto fontSettings = Integration::Instance().fontSettings();
+	if (fontSettings.useOriginalMetrics) {
+		const auto metrics = QFontMetricsF(_st.font->f);
+		const auto heightDelta = (_st.font->height - metrics.height());
+		const auto topMargin = (_st.font->ascent - metrics.ascent())
+			+ (heightDelta ? heightDelta / 2 : 0);
+		_inner->setViewportMargins(0, topMargin, 0, 0);
+	}
 	_inner->document()->setDocumentMargin(0);
 
 	setAttribute(Qt::WA_AcceptTouchEvents);
@@ -1742,6 +1751,18 @@ void InputField::paintEvent(QPaintEvent *e) {
 				auto r = rect().marginsRemoved(_st.textMargins + _st.placeholderMargins);
 				r.moveLeft(r.left() + placeholderLeft);
 				if (style::RightToLeft()) r.moveLeft(width() - r.left() - r.width());
+				const auto fontSettings = Integration::Instance().fontSettings();
+				if (fontSettings.useOriginalMetrics) {
+					const auto metrics = QFontMetricsF(_st.placeholderFont->f);
+					if (_mode == Mode::SingleLine) {
+						const auto heightDelta = (_st.placeholderFont->height - metrics.height());
+						const auto topMargin = (_st.placeholderFont->ascent - metrics.ascent())
+							+ (heightDelta ? heightDelta / 2 : 0);
+						r.moveTop(r.top() + topMargin);
+					} else {
+						r.moveTop(r.top() + _st.placeholderFont->ascent - metrics.ascent());
+					}
+				}
 				p.drawText(r, _placeholder, _st.placeholderAlign);
 			}
 
