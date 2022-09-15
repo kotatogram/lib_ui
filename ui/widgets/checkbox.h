@@ -127,6 +127,9 @@ public:
 	QImage prepareRippleMask() const override;
 	bool checkRippleStartPosition(QPoint position) const override;
 	void setLocked(bool locked);
+	bool isLocked() {
+		return _locked;
+	}
 
 private:
 	void paintXV(QPainter &p, int left, int top, int outerWidth, float64 toggled, const QBrush &brush);
