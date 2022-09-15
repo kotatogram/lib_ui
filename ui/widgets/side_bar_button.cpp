@@ -102,8 +102,7 @@ int SideBarButton::resizeGetHeight(int newWidth) {
 	const auto text = std::min(
 		_text.countHeight(newWidth - _st.textSkip * 2),
 		_st.style.font->height * kMaxLabelLines);
-	const auto add = text - _st.style.font->height;
-	return result + std::max(add, 0);
+	return result + text;
 }
 
 void SideBarButton::paintEvent(QPaintEvent *e) {
