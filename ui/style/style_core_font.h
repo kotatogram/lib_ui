@@ -17,6 +17,7 @@ namespace style {
 namespace internal {
 
 void StartFonts();
+[[nodiscard]] QString GetPossibleEmptyOverride(int32 flags = 0);
 [[nodiscard]] QString GetFontOverride(int32 flags = 0);
 [[nodiscard]] QString MonospaceFont();
 
