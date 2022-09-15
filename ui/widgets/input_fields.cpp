@@ -28,6 +28,7 @@
 #include <QtGui/QTextDocumentFragment>
 #include <QtCore/QMimeData>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QMap>
 
 namespace Ui {
 namespace {
@@ -58,6 +59,8 @@ const auto kNewlineChars = QString("\r\n")
 	+ QChar(0xfdd1) // QTextEndOfFrame
 	+ QChar(QChar::ParagraphSeparator)
 	+ QChar(QChar::LineSeparator);
+
+QMap<QString, QString> customReplacesMap;
 
 // We need unique tags otherwise same custom emoji would join in a single
 // QTextCharFormat with the same properties, including kCustomEmojiText.
@@ -942,6 +945,10 @@ struct FormattingAction {
 
 } // namespace
 
+void AddCustomReplacement(QString from, QString to) {
+	customReplacesMap.insert(from, to);
+}
+
 // kTagUnderline is not used for Markdown.
 
 const QString InputField::kTagBold = QStringLiteral("**");
@@ -1076,6 +1083,9 @@ const InstantReplaces &InstantReplaces::Default() {
 			Assert(emoji != nullptr);
 			result.add(what, emoji->text());
 		}
+		for (auto i = customReplacesMap.constBegin(), e = customReplacesMap.constEnd(); i != e; ++i) {
+			result.add(i.key(), i.value());
+		}
 		return result;
 	}();
 	return result;
@@ -1090,6 +1100,20 @@ const InstantReplaces &InstantReplaces::TextOnly() {
 		result.add(
 			":shrug:",
 			QChar(175) + QString("\\_(") + QChar(12484) + ")_/" + QChar(175));
+		for (auto i = customReplacesMap.constBegin(), e = customReplacesMap.constEnd(); i != e; ++i) {
+			result.add(i.key(), i.value());
+		}
+		return result;
+	}();
+	return result;
+}
+
+const InstantReplaces &InstantReplaces::Custom() {
+	static const auto result = [] {
+		auto result = InstantReplaces();
+		for (auto i = customReplacesMap.constBegin(), e = customReplacesMap.constEnd(); i != e; ++i) {
+			result.add(i.key(), i.value());
+		}
 		return result;
 	}();
 	return result;
@@ -1368,6 +1392,14 @@ void InputField::setExtendedContextMenu(
 
 void InputField::setInstantReplaces(const InstantReplaces &replaces) {
 	_mutableInstantReplaces = replaces;
+}
+
+void InputField::setInstantReplaces(rpl::producer<InstantReplaces> producer) {
+	std::move(
+		producer
+	) | rpl::start_with_next([=](InstantReplaces replaces) {
+		_mutableInstantReplaces = replaces;
+	}, lifetime());
 }
 
 void InputField::setInstantReplacesEnabled(rpl::producer<bool> enabled) {
