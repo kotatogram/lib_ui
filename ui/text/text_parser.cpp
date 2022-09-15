@@ -485,7 +485,10 @@ void Parser::parseCurrentChar() {
 	_emojiLookback = 0;
 	const auto inCustomEmoji = !_customEmojiData.isEmpty();
 	const auto isNewLine = !inCustomEmoji && _multiline && IsNewline(_ch);
-	const auto replaceWithSpace = IsSpace(_ch) && (_ch != QChar::Nbsp);
+	const auto replaceWithSpace = IsSpace(_ch)
+		&& (_ch != QChar::Nbsp)
+		&& _ch != QChar(160)
+		&& _ch != QChar(8203);
 	const auto isDiacritic = IsDiacritic(_ch);
 	const auto isTilde = !inCustomEmoji && _checkTilde && (_ch == '~');
 	const auto skip = [&] {
