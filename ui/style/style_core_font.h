@@ -16,8 +16,15 @@
 
 namespace style {
 
+struct CustomFontSettings {
+	QString monospaceFont;
+	int fontSize = 0;
+	bool semiboldIsBold = false;
+};
+
 [[nodiscard]] const QString &SystemFontTag();
 void SetCustomFont(const QString &font);
+void SetCustomFontSettings(const CustomFontSettings &settings);
 
 enum class FontFlag : uchar {
 	Bold = 0x01,

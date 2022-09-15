@@ -11,6 +11,7 @@
 #include "base/variant.h"
 #include "base/base_file_utilities.h"
 #include "ui/integration.h"
+#include "ui/style/style_core_scale.h"
 
 #include <QtCore/QMap>
 #include <QtCore/QVector>
@@ -38,6 +39,7 @@ namespace style {
 namespace {
 
 QString Custom;
+CustomFontSettings CustomSettings;
 
 } // namespace
 
@@ -48,6 +50,10 @@ const QString &SystemFontTag() {
 
 void SetCustomFont(const QString &font) {
 	Custom = font;
+}
+
+void SetCustomFontSettings(const CustomFontSettings &settings) {
+	CustomSettings = settings;
 }
 
 namespace internal {
@@ -125,6 +131,11 @@ bool LoadCustomFont(const QString &filePath) {
 }
 #endif // !LIB_UI_USE_PACKAGED_FONTS
 
+bool TryFont(const QString &attempt) {
+	const auto resolved = QFontInfo(QFont(attempt)).family();
+	return !resolved.trimmed().compare(attempt, Qt::CaseInsensitive);
+}
+
 [[nodiscard]] QString SystemMonospaceFont() {
 	const auto type = QFontDatabase::FixedFont;
 	return QFontDatabase::systemFont(type).family();
@@ -139,8 +150,7 @@ bool LoadCustomFont(const QString &filePath) {
 		u"Courier"_q,
 	};
 	for (const auto &family : kTryFirst) {
-		const auto resolved = QFontInfo(QFont(family)).family();
-		if (resolved.trimmed().startsWith(family, Qt::CaseInsensitive)) {
+		if (TryFont(family)) {
 			return family;
 		}
 	}
@@ -149,6 +159,10 @@ bool LoadCustomFont(const QString &filePath) {
 
 [[nodiscard]] QString MonospaceFont() {
 	static const auto family = [&]() -> QString {
+		if (TryFont(CustomSettings.monospaceFont)) {
+			return CustomSettings.monospaceFont;
+		}
+
 		const auto manual = ManualMonospaceFont();
 		const auto system = SystemMonospaceFont();
 
@@ -330,7 +344,7 @@ struct Metrics {
 		font.setFeature("ss03", true);
 #endif // Qt >= 6.7.0
 	}
-	font.setPixelSize(size);
+	font.setPixelSize(size + ConvertScale(CustomSettings.fontSize));
 
 	const auto adjust = (overriden || system);
 	const auto metrics = ComputeMetrics(font, adjust);
@@ -341,9 +355,10 @@ struct Metrics {
 		: QFont::Normal);
 	if (font.bold()) {
 		const auto style = QFontInfo(font).styleName();
-		if (!style.isEmpty() && !style.startsWith(
-				"Semibold",
-				Qt::CaseInsensitive)) {
+		if (CustomSettings.semiboldIsBold
+				|| (!style.isEmpty() && !style.startsWith(
+					"Semibold",
+					Qt::CaseInsensitive))) {
 			font.setBold(true);
 		}
 	}
