@@ -204,10 +204,12 @@ void BoxContent::updateShadowsVisibility() {
 
 	const auto top = _scroll->scrollTop();
 	_topShadow->toggle(
-		(top > 0 || _innerTopSkip > 0),
+		(top > 0
+			|| (_innerTopSkip > 0 && !_topShadowWithSkip)),
 		anim::type::normal);
 	_bottomShadow->toggle(
-		(top < _scroll->scrollTopMax() || _innerBottomSkip > 0),
+		(top < _scroll->scrollTopMax()
+			|| (_innerBottomSkip > 0 && !_bottomShadowWithSkip)),
 		anim::type::normal);
 }
 
@@ -298,10 +300,12 @@ void BoxContent::updateScrollAreaGeometry() {
 
 		const auto top = _scroll->scrollTop();
 		_topShadow->toggle(
-			(top > 0 || _innerTopSkip > 0),
+			(top > 0
+				|| (_innerTopSkip > 0 && !_topShadowWithSkip)),
 			anim::type::instant);
 		_bottomShadow->toggle(
-			(top < _scroll->scrollTopMax() || _innerBottomSkip > 0),
+			(top < _scroll->scrollTopMax()
+				|| (_innerBottomSkip > 0 && !_bottomShadowWithSkip)),
 			anim::type::instant);
 	}
 }
