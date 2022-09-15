@@ -673,3 +673,27 @@ statisticsChartLineCyan: #40d0ca; // represents cyan color on statistical charts
 creditsBg1: #f7d05f; // credits icon gradient 1
 creditsBg2: #fcecc0; // credits icon gradient 2
 creditsStroke: #da8735; // credits icon stroke
+
+// kotatogram
+ktgMessageNameIconFg: historyPeer4NameFg; // Kotatogram: icon near sender name in a message (obsolete)
+ktgMessageNameIconFgSelected: ktgMessageNameIconFg; // Kotatogram: icon near sender name in a selected message (obsolete)
+
+ktgMessageName1IconFg: historyPeer1NameFg; // Kotatogram: red icon near sender name in a message
+ktgMessageName1IconFgSelected: ktgMessageName1IconFg; // Kotatogram: red icon near sender name in a selected message
+ktgMessageName2IconFg: historyPeer2NameFg; // Kotatogram: green icon near sender name in a message
+ktgMessageName2IconFgSelected: ktgMessageName2IconFg; // Kotatogram: green icon near sender name in a selected message
+ktgMessageName3IconFg: historyPeer3NameFg; // Kotatogram: yellow icon near sender name in a message
+ktgMessageName3IconFgSelected: ktgMessageName3IconFg; // Kotatogram: yellow icon near sender name in a selected message
+ktgMessageName4IconFg: ktgMessageNameIconFg; // Kotatogram: blue icon near sender name in a message
+ktgMessageName4IconFgSelected: ktgMessageNameIconFgSelected; // Kotatogram: blue icon near sender name in a selected message
+ktgMessageName5IconFg: historyPeer5NameFg; // Kotatogram: purple icon near sender name in a message
+ktgMessageName5IconFgSelected: ktgMessageName5IconFg; // Kotatogram: purple icon near sender name in a selected message
+ktgMessageName6IconFg: historyPeer6NameFg; // Kotatogram: pink icon near sender name in a message
+ktgMessageName6IconFgSelected: ktgMessageName6IconFg; // Kotatogram: pink icon near sender name in a selected message
+ktgMessageName7IconFg: historyPeer7NameFg; // Kotatogram: sea icon near sender name in a message
+ktgMessageName7IconFgSelected: ktgMessageName7IconFg; // Kotatogram: sea icon near sender name in a selected message
+ktgMessageName8IconFg: historyPeer8NameFg; // Kotatogram: orange icon near sender name in a message
+ktgMessageName8IconFgSelected: ktgMessageName8IconFg; // Kotatogram: orange icon near sender name in a selected message
+
+ktgMessageNameSponsoredIconFg: boxTextFgGood; // Kotatogram: icon near sender name in a sponsored message
+ktgMessageNameSponsoredIconFgSelected: ktgMessageNameSponsoredIconFg; // Kotatogram: icon near sender name in a selected sponsored message
