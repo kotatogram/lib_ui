@@ -1212,6 +1212,8 @@ PeerListItem {
 	height: pixels;
 	photoPosition: point;
 	namePosition: point;
+	chatNamePosition: point;
+	chatDescPosition: point;
 	nameStyle: TextStyle;
 	nameFg: color;
 	nameFgChecked: color;
