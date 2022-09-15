@@ -18,13 +18,15 @@ public:
 
 	void drawTextLeft(int x, int y, int outerw, const QString &text, int textWidth = -1) {
 		QFontMetrics m(fontMetrics());
+		auto ascent = (_ascent == 0 ? m.ascent() : _ascent);
 		if (style::RightToLeft() && textWidth < 0) textWidth = m.horizontalAdvance(text);
-		drawText(style::RightToLeft() ? (outerw - x - textWidth) : x, y + m.ascent(), text);
+		drawText(style::RightToLeft() ? (outerw - x - textWidth) : x, y + ascent, text);
 	}
 	void drawTextRight(int x, int y, int outerw, const QString &text, int textWidth = -1) {
 		QFontMetrics m(fontMetrics());
+		auto ascent = (_ascent == 0 ? m.ascent() : _ascent);
 		if (!style::RightToLeft() && textWidth < 0) textWidth = m.horizontalAdvance(text);
-		drawText(style::RightToLeft() ? x : (outerw - x - textWidth), y + m.ascent(), text);
+		drawText(style::RightToLeft() ? x : (outerw - x - textWidth), y + ascent, text);
 	}
 	void drawPixmapLeft(int x, int y, int outerw, const QPixmap &pix, const QRect &from) {
 		drawPixmap(QPoint(style::RightToLeft() ? (outerw - x - (from.width() / pix.devicePixelRatio())) : x, y), pix, from);
@@ -78,10 +80,15 @@ public:
 	[[nodiscard]] bool inactive() const {
 		return _inactive;
 	}
+	void setFont(const style::font &font) {
+		_ascent = font->ascent;
+		QPainter::setFont(font->f);
+	}
 
 private:
 	const style::TextPalette *_textPalette = nullptr;
 	bool _inactive = false;
+	int _ascent = 0;
 
 };
 

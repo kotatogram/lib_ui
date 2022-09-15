@@ -22,6 +22,10 @@ struct TextParseOptions;
 class ClickHandler;
 struct EntityLinkData;
 
+namespace style {
+struct CustomFontSettings;
+} // namespace style
+
 namespace Ui {
 namespace Emoji {
 class One;
@@ -47,6 +51,8 @@ public:
 
 	virtual void textActionsUpdated();
 	virtual void activationFromTopPanel();
+
+	virtual style::CustomFontSettings fontSettings();
 
 	[[nodiscard]] virtual bool screenIsLocked();
 	[[nodiscard]] virtual QString timeFormat();

@@ -6,6 +6,7 @@
 //
 #include "ui/integration.h"
 
+#include "ui/style/style_core_custom_font.h"
 #include "ui/gl/gl_detection.h"
 #include "ui/text/text_entity.h"
 #include "ui/text/text_block.h"
@@ -41,6 +42,10 @@ void Integration::textActionsUpdated() {
 }
 
 void Integration::activationFromTopPanel() {
+}
+
+style::CustomFontSettings Integration::fontSettings() {
+	return {};
 }
 
 bool Integration::screenIsLocked() {

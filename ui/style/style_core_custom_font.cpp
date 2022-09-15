@@ -7,6 +7,8 @@
 #include "ui/style/style_core_custom_font.h"
 
 #include "ui/style/style_core_font.h"
+#include "ui/style/style_core_scale.h"
+#include "ui/integration.h"
 
 #include <QGuiApplication>
 #include <QFontDatabase>
@@ -29,6 +31,9 @@ void SetCustomFonts(const CustomFont &regular, const CustomFont &bold) {
 QFont ResolveFont(uint32 flags, int size) {
 	static auto Database = QFontDatabase();
 
+	const auto fontSettings = Ui::Integration::Instance().fontSettings();
+	const auto overrideIsEmpty = GetPossibleEmptyOverride(flags).isEmpty();
+
 	const auto bold = ((flags & FontBold) || (flags & FontSemibold));
 	const auto italic = (flags & FontItalic);
 	const auto &custom = bold ? BoldFont : RegularFont;
@@ -45,18 +50,29 @@ QFont ResolveFont(uint32 flags, int size) {
 		const auto point = good.isEmpty() ? size : good.front();
 		result = Database.font(custom.family, custom.style, point);
 	} else {
-		result.setFamily(GetFontOverride(flags));
+		if (!fontSettings.useSystemFont || !overrideIsEmpty) {
+			result.setFamily(GetFontOverride(flags));
+		}
 		if (bold) {
+			if (fontSettings.semiboldIsBold) {
+				result.setBold(true);
 #ifdef DESKTOP_APP_USE_PACKAGED_FONTS
-			result.setWeight(QFont::DemiBold);
-#else // DESKTOP_APP_USE_PACKAGED_FONTS
-			result.setBold(true);
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
-
-			if (flags & FontItalic) {
-				result.setStyleName("Semibold Italic");
 			} else {
-				result.setStyleName("Semibold");
+				result.setWeight(QFont::DemiBold);
+#else // DESKTOP_APP_USE_PACKAGED_FONTS
+			} else if (fontSettings.useSystemFont) {
+				result.setWeight(QFont::DemiBold);
+			} else {
+				result.setBold(true);
+#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+			}
+
+			if (!fontSettings.semiboldIsBold) {
+				if (flags & FontItalic) {
+					result.setStyleName("Semibold Italic");
+				} else {
+					result.setStyleName("Semibold");
+				}
 			}
 		}
 	}
@@ -66,7 +82,7 @@ QFont ResolveFont(uint32 flags, int size) {
 
 	result.setUnderline(flags & FontUnderline);
 	result.setStrikeOut(flags & FontStrikeOut);
-	result.setPixelSize(size);
+	result.setPixelSize(size + ConvertScale(fontSettings.fontSize));
 
 	return result;
 }

@@ -96,6 +96,11 @@ bool LoadCustomFont(const QString &filePath, const QString &familyName, int flag
 	return QFontDatabase::systemFont(type).family();
 }
 
+bool TryFont(const QString &attempt) {
+	const auto resolved = QFontInfo(QFont(attempt)).family();
+	return !resolved.trimmed().compare(attempt, Qt::CaseInsensitive);
+}
+
 [[nodiscard]] QString ManualMonospaceFont() {
 	const auto kTryFirst = std::initializer_list<QString>{
 		"Consolas",
@@ -104,12 +109,21 @@ bool LoadCustomFont(const QString &filePath, const QString &familyName, int flag
 		"Courier"
 	};
 	for (const auto &family : kTryFirst) {
-		const auto resolved = QFontInfo(QFont(family)).family();
-		if (!resolved.trimmed().compare(family, Qt::CaseInsensitive)) {
+		if (TryFont(family)) {
 			return family;
 		}
 	}
 	return QString();
+}
+
+QFontMetrics GetFontMetrics(int size) {
+#ifdef DESKTOP_APP_USE_PACKAGED_FONTS
+	QFont originalFont("Open Sans");
+#else // !DESKTOP_APP_USE_PACKAGED_FONTS
+	QFont originalFont("DAOpenSansRegular");
+#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+	originalFont.setPixelSize(size);
+	return QFontMetrics(originalFont);
 }
 
 enum {
@@ -178,51 +192,71 @@ void StartFonts() {
 
 	style_InitFontsResource();
 
+	const auto fontSettings = Ui::Integration::Instance().fontSettings();
+
 #ifndef DESKTOP_APP_USE_PACKAGED_FONTS
-	[[maybe_unused]] bool areGood[FontTypesCount] = { false };
-	for (auto i = 0; i != FontTypesCount; ++i) {
-		const auto file = FontTypeFiles[i];
-		const auto name = FontTypeNames[i];
-		const auto flags = FontTypeFlags[i];
-		areGood[i] = LoadCustomFont(":/gui/fonts/" + file + ".ttf", name, flags);
-		Overrides[i] = name;
+	if (!fontSettings.useSystemFont) {
+		[[maybe_unused]] bool areGood[FontTypesCount] = { false };
+		for (auto i = 0; i != FontTypesCount; ++i) {
+			const auto file = FontTypeFiles[i];
+			const auto name = FontTypeNames[i];
+			const auto flags = FontTypeFlags[i];
+			areGood[i] = LoadCustomFont(":/gui/fonts/" + file + ".ttf", name, flags);
+			Overrides[i] = name;
 
 		const auto persianFallbackFile = FontTypePersianFallbackFiles[i];
 		const auto persianFallback = FontTypePersianFallback[i];
 		LoadCustomFont(":/gui/fonts/" + persianFallbackFile + ".ttf", persianFallback, flags);
 
 #ifdef Q_OS_WIN
-		// Attempt to workaround a strange font bug with Open Sans Semibold not loading.
-		// See https://github.com/telegramdesktop/tdesktop/issues/3276 for details.
-		// Crash happens on "options.maxh / _t->_st->font->height" with "division by zero".
-		// In that place "_t->_st->font" is "semiboldFont" is "font(13 "Open Sans Semibold").
-		const auto fallback = "Segoe UI";
-		if (!areGood[i]) {
-			if (ValidateFont(fallback, flags)) {
-				Overrides[i] = fallback;
-				LOG(("Fonts Info: Using '%1' instead of '%2'.").arg(fallback).arg(name));
+			// Attempt to workaround a strange font bug with Open Sans Semibold not loading.
+			// See https://github.com/telegramdesktop/tdesktop/issues/3276 for details.
+			// Crash happens on "options.maxh / _t->_st->font->height" with "division by zero".
+			// In that place "_t->_st->font" is "semiboldFont" is "font(13 "Open Sans Semibold").
+			const auto fallback = "Segoe UI";
+			if (!areGood[i]) {
+				if (ValidateFont(fallback, flags)) {
+					Overrides[i] = fallback;
+					LOG(("Fonts Info: Using '%1' instead of '%2'.").arg(fallback).arg(name));
+				}
 			}
-		}
-		// Disable default fallbacks to Segoe UI, see:
-		// https://github.com/telegramdesktop/tdesktop/issues/5368
-		//
-		//QFont::insertSubstitution(name, fallback);
+			// Disable default fallbacks to Segoe UI, see:
+			// https://github.com/telegramdesktop/tdesktop/issues/5368
+			//
+			//QFont::insertSubstitution(name, fallback);
 #endif // Q_OS_WIN
 
 		QFont::insertSubstitution(name, persianFallback);
 	}
 
 #ifdef Q_OS_MAC
-	auto list = QStringList();
-	list.append("STIXGeneral");
-	list.append(".SF NS Text");
-	list.append("Helvetica Neue");
-	list.append("Lucida Grande");
-	for (const auto &name : FontTypeNames) {
-		QFont::insertSubstitutions(name, list);
-	}
+		auto list = QStringList();
+		list.append("STIXGeneral");
+		list.append(".SF NS Text");
+		list.append("Helvetica Neue");
+		list.append("Lucida Grande");
+		for (const auto &name : FontTypeNames) {
+			QFont::insertSubstitutions(name, list);
+		}
 #endif // Q_OS_MAC
+	}
 #endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+
+	if (!fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
+		Overrides[FontTypeRegular] = fontSettings.mainFont;
+		Overrides[FontTypeRegularItalic] = fontSettings.mainFont;
+	}
+	if (!fontSettings.semiboldFont.isEmpty() && ValidateFont(fontSettings.semiboldFont)) {
+		Overrides[FontTypeBold] = fontSettings.semiboldFont;
+		Overrides[FontTypeBoldItalic] = fontSettings.semiboldFont;
+		Overrides[FontTypeSemibold] = fontSettings.semiboldFont;
+		Overrides[FontTypeSemiboldItalic] = fontSettings.semiboldFont;
+	} else if (!fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
+		Overrides[FontTypeBold] = fontSettings.mainFont;
+		Overrides[FontTypeBoldItalic] = fontSettings.mainFont;
+		Overrides[FontTypeSemibold] = fontSettings.mainFont;
+		Overrides[FontTypeSemiboldItalic] = fontSettings.mainFont;
+	}
 
 	auto appFont = QApplication::font();
 	appFont.setStyleStrategy(QFont::PreferQuality);
@@ -256,6 +290,12 @@ QString GetFontOverride(int32 flags) {
 
 QString MonospaceFont() {
 	static const auto family = [&]() -> QString {
+		const auto fontSettings = Ui::Integration::Instance().fontSettings();
+
+		if (TryFont(fontSettings.monospaceFont)) {
+			return fontSettings.monospaceFont;
+		}
+
 		const auto manual = ManualMonospaceFont();
 		const auto system = SystemMonospaceFont();
 
@@ -268,7 +308,7 @@ QString MonospaceFont() {
 		const auto useSystem = manual.isEmpty()
 			|| (metrics.horizontalAdvance(QChar('i')) == metrics.horizontalAdvance(QChar('W')));
 #endif // Q_OS_WIN || Q_OS_MAC
-		return useSystem ? system : manual;
+		return (useSystem || fontSettings.useSystemFont) ? system : manual;
 	}();
 
 	return family;
@@ -302,9 +342,19 @@ FontData::FontData(int size, uint32 flags, int family, Font *other)
 	}
 	modified[_flags] = Font(this);
 
-	height = m.height();
-	ascent = m.ascent();
-	descent = m.descent();
+	const auto fontSettings = Ui::Integration::Instance().fontSettings();
+	if (fontSettings.useOriginalMetrics && !(_flags & FontMonospace)) {
+		const auto mOrig = GetFontMetrics(size);
+
+		height = mOrig.height();
+		ascent = mOrig.ascent();
+		descent = mOrig.descent();
+	} else {
+		height = m.height();
+		ascent = m.ascent();
+		descent = m.descent();
+	}
+
 	spacew = width(QLatin1Char(' '));
 	elidew = width("...");
 }
