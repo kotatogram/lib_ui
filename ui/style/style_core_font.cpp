@@ -10,6 +10,7 @@
 #include "base/debug_log.h"
 #include "base/base_file_utilities.h"
 #include "ui/integration.h"
+#include "ui/style/style_core_scale.h"
 
 #include <QtCore/QMap>
 #include <QtCore/QVector>
@@ -44,6 +45,7 @@ namespace {
 constexpr auto kSubSuperMultiplier = 0.75;
 
 QString Custom;
+CustomFontSettings CustomSettings;
 
 } // namespace
 
@@ -54,6 +56,10 @@ const QString &SystemFontTag() {
 
 void SetCustomFont(const QString &font) {
 	Custom = font;
+}
+
+void SetCustomFontSettings(const CustomFontSettings &settings) {
+	CustomSettings = settings;
 }
 
 namespace internal {
@@ -141,6 +147,14 @@ bool LoadCustomFont(const QString &filePath) {
 	return true;
 }
 
+bool TryFont(const QString &attempt) {
+	if (attempt.isEmpty()) {
+		return false;
+	}
+	const auto resolved = QFontInfo(QFont(attempt)).family();
+	return resolved.trimmed().startsWith(attempt, Qt::CaseInsensitive);
+}
+
 [[nodiscard]] QString SystemMonospaceFont() {
 	const auto type = QFontDatabase::FixedFont;
 	return QFontDatabase::systemFont(type).family();
@@ -155,8 +169,7 @@ bool LoadCustomFont(const QString &filePath) {
 		u"Courier"_q,
 	};
 	for (const auto &family : kTryFirst) {
-		const auto resolved = QFontInfo(QFont(family)).family();
-		if (resolved.trimmed().startsWith(family, Qt::CaseInsensitive)) {
+		if (TryFont(family)) {
 			return family;
 		}
 	}
@@ -165,6 +178,10 @@ bool LoadCustomFont(const QString &filePath) {
 
 [[nodiscard]] QString MonospaceFont() {
 	static const auto family = [&]() -> QString {
+		if (TryFont(CustomSettings.monospaceFont)) {
+			return CustomSettings.monospaceFont;
+		}
+
 		const auto manual = ManualMonospaceFont();
 		const auto system = SystemMonospaceFont();
 
@@ -343,7 +360,8 @@ struct Metrics {
 	} else {
 		font.setFamily("Open Sans"_q);
 	}
-	font.setPixelSize(size);
+	font.setPixelSize(
+		std::max(size + ConvertScale(CustomSettings.fontSize), 1));
 
 	const auto adjust = (overriden || system);
 	const auto metrics = ComputeMetrics(font, adjust);
@@ -360,9 +378,10 @@ struct Metrics {
 			: QFont::Normal);
 		if (font.bold()) {
 			const auto style = QFontInfo(font).styleName();
-			if (!style.isEmpty() && !style.startsWith(
+			if (CustomSettings.semiboldIsBold
+				|| (!style.isEmpty() && !style.startsWith(
 					"Semibold",
-					Qt::CaseInsensitive)) {
+					Qt::CaseInsensitive))) {
 				font.setBold(true);
 			}
 		}
