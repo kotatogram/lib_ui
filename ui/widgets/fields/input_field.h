@@ -67,6 +67,7 @@ struct InstantReplaces {
 
 	static const InstantReplaces &Default();
 	static const InstantReplaces &TextOnly();
+	static const InstantReplaces &Custom();
 
 	int maxLength = 0;
 	Node reverseMap;
@@ -290,6 +291,7 @@ public:
 	void setAdditionalMargins(QMargins margins);
 
 	void setInstantReplaces(const InstantReplaces &replaces);
+	void setInstantReplaces(rpl::producer<InstantReplaces> producer);
 	void setInstantReplacesEnabled(
 		rpl::producer<bool> enabled,
 		rpl::producer<bool> systemTextReplacesEnabled = {});

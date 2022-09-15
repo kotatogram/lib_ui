@@ -1835,6 +1835,17 @@ const InstantReplaces &InstantReplaces::TextOnly() {
 	return result;
 }
 
+const InstantReplaces &InstantReplaces::Custom() {
+	static const auto result = [] {
+		auto result = InstantReplaces();
+		for (auto i = customReplacesMap.constBegin(), e = customReplacesMap.constEnd(); i != e; ++i) {
+			result.add(i.key(), i.value());
+		}
+		return result;
+	}();
+	return result;
+}
+
 bool MarkdownEnabledState::disabled() const {
 	return v::is<MarkdownDisabled>(data);
 }
@@ -2240,6 +2251,14 @@ void InputField::addContextMenuHook(ContextMenuHook hook) {
 
 void InputField::setInstantReplaces(const InstantReplaces &replaces) {
 	_mutableInstantReplaces = replaces;
+}
+
+void InputField::setInstantReplaces(rpl::producer<InstantReplaces> producer) {
+	std::move(
+		producer
+	) | rpl::on_next([=](InstantReplaces replaces) {
+		_mutableInstantReplaces = replaces;
+	}, lifetime());
 }
 
 void InputField::setInstantReplacesEnabled(
