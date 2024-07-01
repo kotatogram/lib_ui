@@ -31,6 +31,7 @@ public:
 		const style::margins &padding);
 
 	SlideWrap *setDuration(int duration);
+	SlideWrap *setDirectionUp(bool up);
 	SlideWrap *toggle(bool shown, anim::type animated);
 	SlideWrap *show(anim::type animated) {
 		return toggle(true, animated);
@@ -52,6 +53,7 @@ public:
 	auto toggledValue() const {
 		return _toggledChanged.events_starting_with_copy(_toggled);
 	}
+	void setMinimalHeight(int height);
 
 	QMargins getMargins() const override;
 
@@ -62,10 +64,12 @@ protected:
 private:
 	void animationStep();
 
-	bool _toggled = true;
 	rpl::event_stream<bool> _toggledChanged;
 	Animations::Simple _animation;
 	int _duration = 0;
+	bool _toggled = true;
+	bool _up = false;
+	int _minimalHeight = 0;
 
 };
 
@@ -93,6 +97,9 @@ public:
 
 	SlideWrap *setDuration(int duration) {
 		return chain(Parent::setDuration(duration));
+	}
+	SlideWrap *setDirectionUp(bool up) {
+		return chain(Parent::setDirectionUp(up));
 	}
 	SlideWrap *toggle(bool shown, anim::type animated) {
 		return chain(Parent::toggle(shown, animated));

@@ -21,7 +21,7 @@ int DevicePixelRatio() {
 }
 
 void SetDevicePixelRatio(int ratio) {
-	DevicePixelRatioValue = ratio;
+	DevicePixelRatioValue = std::clamp(ratio, 1, kScaleMax / kScaleMin);
 }
 
 int Scale() {
@@ -32,6 +32,18 @@ void SetScale(int scale) {
 	Expects(scale != 0);
 
 	ScaleValue = scale;
+}
+
+int MaxScaleForRatio(int ratio) {
+	Expects(ratio > 0);
+
+	return std::max(kScaleMax / ratio, kScaleAlwaysAllowMax);
+}
+
+int CheckScale(int scale) {
+	return (scale == kScaleAuto)
+		? kScaleAuto
+		: std::clamp(scale, kScaleMin, MaxScaleForRatio(DevicePixelRatio()));
 }
 
 } // namespace style

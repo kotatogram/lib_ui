@@ -105,7 +105,10 @@ public:
 				_dragStarted = _checkStartDrag();
 			} else if (([e type] == NSEventTypeLeftMouseDragged)
 					&& _dragStarted) {
-				return _checkPerformDrag([e window]);
+				if (_checkPerformDrag([e window])) {
+					return true;
+				}
+				_dragStarted = false;
 			}
 		}
 		return false;
@@ -130,12 +133,14 @@ public:
 	[[nodiscard]] bool checkNativeMove(void *nswindow) const;
 	void activateBeforeNativeMove();
 	void setStaysOnTop(bool enabled);
+	void setNativeTitleVisibility(bool visible);
 	void close();
 
 private:
 	void init();
 	void initOpenGL();
 	void resolveWeakPointers();
+	void revalidateWeakPointers() const;
 	void initCustomTitle();
 
 	[[nodiscard]] Fn<void(bool)> toggleCustomTitleCallback();
@@ -147,6 +152,7 @@ private:
 
 	NSWindow * __weak _nativeWindow = nil;
 	NSView * __weak _nativeView = nil;
+	bool _hadNativeValues = false;
 
 	std::unique_ptr<LayerCreationChecker> _layerCreationChecker;
 
@@ -170,6 +176,7 @@ int WindowHelper::Private::customTitleHeight() const {
 }
 
 QRect WindowHelper::Private::controlsRect() const {
+	revalidateWeakPointers();
 	const auto button = [&](NSWindowButton type) {
 		auto view = [_nativeWindow standardWindowButton:type];
 		if (!view) {
@@ -200,8 +207,9 @@ QRect WindowHelper::Private::controlsRect() const {
 }
 
 bool WindowHelper::Private::checkNativeMove(void *nswindow) const {
+	revalidateWeakPointers();
 	if (_nativeWindow != nswindow
-		|| ([_nativeWindow styleMask] & NSFullScreenWindowMask) == NSFullScreenWindowMask) {
+		|| ([_nativeWindow styleMask] & NSWindowStyleMaskFullScreen) == NSWindowStyleMaskFullScreen) {
 		return false;
 	}
 	const auto cgReal = [NSEvent mouseLocation];
@@ -213,6 +221,7 @@ bool WindowHelper::Private::checkNativeMove(void *nswindow) const {
 }
 
 void WindowHelper::Private::activateBeforeNativeMove() {
+	revalidateWeakPointers();
 	[_nativeWindow makeKeyAndOrderFront:_nativeWindow];
 }
 
@@ -220,13 +229,27 @@ void WindowHelper::Private::setStaysOnTop(bool enabled) {
 	_owner->BasicWindowHelper::setStaysOnTop(enabled);
 	resolveWeakPointers();
 	initCustomTitle();
+	_owner->updateCustomTitleVisibility(true);
+}
+
+void WindowHelper::Private::setNativeTitleVisibility(bool visible) {
+	revalidateWeakPointers();
+	if (!_nativeWindow) {
+		return;
+	}
+	const auto value = visible ? NSWindowTitleVisible : NSWindowTitleHidden;
+	[_nativeWindow setTitleVisibility:value];
 }
 
 void WindowHelper::Private::close() {
 	const auto weak = Ui::MakeWeak(_owner->window());
 	QCloseEvent e;
 	qApp->sendEvent(_owner->window(), &e);
-	if (e.isAccepted() && weak && _nativeWindow) {
+	if (!e.isAccepted() || !weak) {
+		return;
+	}
+	revalidateWeakPointers();
+	if (_nativeWindow) {
 		[_nativeWindow close];
 	}
 }
@@ -243,8 +266,9 @@ Fn<void()> WindowHelper::Private::enforceStyleCallback() {
 }
 
 void WindowHelper::Private::enforceStyle() {
+	revalidateWeakPointers();
 	if (_nativeWindow && _customTitleHeight > 0) {
-		[_nativeWindow setStyleMask:[_nativeWindow styleMask] | NSFullSizeContentViewWindowMask];
+		[_nativeWindow setStyleMask:[_nativeWindow styleMask] | NSWindowStyleMaskFullSizeContentView];
 	}
 }
 
@@ -253,12 +277,22 @@ void WindowHelper::Private::initOpenGL() {
 }
 
 void WindowHelper::Private::resolveWeakPointers() {
-	_owner->window()->createWinId();
+	if (!_owner->window()->winId()) {
+		_owner->window()->createWinId();
+	}
 
 	_nativeView = reinterpret_cast<NSView*>(_owner->window()->winId());
 	_nativeWindow = _nativeView ? [_nativeView window] : nullptr;
+	_hadNativeValues = true;
 
 	Ensures(_nativeWindow != nullptr);
+}
+
+void WindowHelper::Private::revalidateWeakPointers() const {
+	if (_nativeWindow || !_hadNativeValues) {
+		return;
+	}
+	const_cast<Private*>(this)->resolveWeakPointers();
 }
 
 void WindowHelper::Private::initCustomTitle() {
@@ -282,7 +316,7 @@ void WindowHelper::Private::initCustomTitle() {
 	// Emulate custom title instead (code below).
 	//
 	// Tried to backport a fix, testing.
-	[_nativeWindow setStyleMask:[_nativeWindow styleMask] | NSFullSizeContentViewWindowMask];
+	[_nativeWindow setStyleMask:[_nativeWindow styleMask] | NSWindowStyleMaskFullSizeContentView];
 	auto inner = [_nativeWindow contentLayoutRect];
 	auto full = [_nativeView frame];
 	_customTitleHeight = qMax(qRound(full.size.height - inner.size.height), 0);
@@ -316,10 +350,8 @@ WindowHelper::WindowHelper(not_null<RpWidget*> window)
 	window.get(),
 	_private->customTitleHeight()))
 , _body(Ui::CreateChild<RpWidget>(window.get())) {
-	if (_title->shouldBeHidden()) {
-		updateCustomTitleVisibility();
-	}
 	init();
+	_title->setControlsRect(_private->controlsRect());
 }
 
 WindowHelper::~WindowHelper() {
@@ -336,14 +368,12 @@ QMargins WindowHelper::frameMargins() {
 
 void WindowHelper::setTitle(const QString &title) {
 	_title->setText(title);
-	window()->setWindowTitle(_titleVisible ? QString() : title);
+	window()->setWindowTitle(title);
 }
 
 void WindowHelper::setTitleStyle(const style::WindowTitle &st) {
 	_title->setStyle(st);
-	if (_title->shouldBeHidden()) {
-		updateCustomTitleVisibility();
-	}
+	updateCustomTitleVisibility();
 }
 
 void WindowHelper::updateCustomTitleVisibility(bool force) {
@@ -352,15 +382,15 @@ void WindowHelper::updateCustomTitleVisibility(bool force) {
 		return;
 	}
 	_title->setVisible(visible);
-	window()->setWindowTitle(_titleVisible ? QString() : _title->text());
+	_private->setNativeTitleVisibility(!_titleVisible);
 }
 
 void WindowHelper::setMinimumSize(QSize size) {
-	window()->setMinimumSize(size.width(), _title->height() + size.height());
+	window()->setMinimumSize(size.width(), frameMargins().top() + size.height());
 }
 
 void WindowHelper::setFixedSize(QSize size) {
-	window()->setFixedSize(size.width(), _title->height() + size.height());
+	window()->setFixedSize(size.width(), frameMargins().top() + size.height());
 }
 
 void WindowHelper::setStaysOnTop(bool enabled) {
@@ -368,7 +398,7 @@ void WindowHelper::setStaysOnTop(bool enabled) {
 }
 
 void WindowHelper::setGeometry(QRect rect) {
-	window()->setGeometry(rect.marginsAdded({ 0, _title->height(), 0, 0 }));
+	window()->setGeometry(rect.marginsAdded(frameMargins()));
 }
 
 void WindowHelper::setupBodyTitleAreaEvents() {
@@ -393,7 +423,13 @@ void WindowHelper::close() {
 	_private->close();
 }
 
+const style::TextStyle &WindowHelper::titleTextStyle() const {
+	return _title->textStyle();
+}
+
 void WindowHelper::init() {
+	updateCustomTitleVisibility(true);
+
 	style::PaletteChanged(
 	) | rpl::start_with_next([=] {
 		Ui::ForceFullRepaint(window());

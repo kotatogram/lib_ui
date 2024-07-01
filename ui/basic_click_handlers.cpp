@@ -64,11 +64,13 @@ QString UrlClickHandler::EncodeForOpening(const QString &originalUrl) {
 		? QString::fromUtf8(good.toEncoded())
 		: originalUrl;
 
+	static const auto RegExp = QRegularExpression(
+		QStringLiteral("^[a-zA-Z]+:"));
+
 	if (!result.isEmpty()
-		&& !QRegularExpression(
-			QStringLiteral("^[a-zA-Z]+:")).match(result).hasMatch()) {
+		&& !RegExp.match(result).hasMatch()) {
 		// No protocol.
-		return QStringLiteral("http://") + result;
+		return QStringLiteral("https://") + result;
 	}
 	return result;
 }

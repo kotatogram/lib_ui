@@ -53,9 +53,9 @@ attentionButtonBgRipple: #f4c3c2; // default attention button ripple effect
 menuBg: windowBg; // default popup menu background
 menuBgOver: windowBgOver; // default popup menu item background with mouse over
 menuBgRipple: windowBgRipple; // default popup menu item ripple effect
-menuIconFg: #a8a8a8; // default popup menu item icon (like main menu)
-menuIconFgOver: #999999; // default popup menu item icon with mouse over
-menuSubmenuArrowFg: #666B72; // default popup menu submenu arrow icon (like in message field context menu in case of RTL system language)
+menuIconFg: #999999; // default popup menu item icon (like main menu)
+menuIconFgOver: #8a8a8a; // default popup menu item icon with mouse over
+menuSubmenuArrowFg: #373737; // default popup menu submenu arrow icon (like in message field context menu in case of RTL system language)
 menuFgDisabled: #cccccc; // default popup menu item disabled text (like unavailable items in message field context menu)
 menuSeparatorFg: #f1f1f1; // default popup menu separator (like in message field context menu)
 
@@ -161,7 +161,6 @@ callArrowMissedFg: #dd5b4a | boxTextFgError; // missed phone call arrow (in call
 introBg: windowBg; // login background
 introTitleFg: windowBoldFg; // login title text
 introDescriptionFg: windowSubTextFg; // login description text
-introErrorFg: windowSubTextFg; // login error text (like when providing a wrong log in code)
 
 introCoverTopBg: #0f89d0; // intro gradient top (from)
 introCoverBottomBg: #39b0f0; // intro gradient bottom (to)
@@ -230,9 +229,6 @@ dialogsScamFgActive: dialogsDraftFgActive; // chat list scam label for current (
 dialogsRippleBg: windowBgRipple; // chat list background ripple effect
 dialogsRippleBgActive: activeButtonBgRipple; // chat list background ripple effect for current (active) chat
 
-dialogsForwardBg: dialogsBgActive; // forwarding panel background (when forwarding messages in the smallest window size)
-dialogsForwardFg: dialogsNameFgActive; // forwarding panel text (when forwarding messages in the smallest window size)
-
 searchedBarBg: windowBgOver; // search results bar background (in chats list, contacts box..)
 searchedBarFg: windowSubTextFgOver; // search results bar text (in chats list, contacts box..)
 
@@ -243,11 +239,13 @@ emojiPanBg: windowBg; // emoji panel background
 emojiPanCategories: #f7f7f7 | windowBg; // emoji panel categories background
 emojiPanHeaderFg: windowSubTextFg; // emoji panel section header text
 emojiPanHeaderBg: #fffffff2 | emojiPanBg; // emoji panel section header background
-emojiIconFg: checkboxFg; // emoji category icon
-emojiIconFgActive: windowBgActive; // active emoji category icon
+emojiIconFg: #999999; // emoji category icon
+emojiSubIconFgActive: #666666 | windowBoldFg; // active emoji subcategory icon
 stickerPanDeleteBg: #000000ff; // delete X button background for custom sent stickers in stickers panel (legacy)
 stickerPanDeleteFg: windowFgActive; // delete X button icon for custom sent stickers in stickers panel (legacy)
 stickerPreviewBg: #ffffffb0; // sticker and GIF preview background (when you press and hold on a sticker)
+stickerPanPremium1: #5a99ff; // premium sticker pack icon gradient 1
+stickerPanPremium2: #45b9f3; // premium sticker pack icon gradient 2
 
 historyTextInFg: windowFg; // inbox message text
 historyTextInFgSelected: historyTextInFg; // inbox message selected text or text in a selected message
@@ -283,31 +281,51 @@ historyForwardChooseFg: windowFgActive; // forwarding messages in a large window
 
 historyPeer1NameFg: #c03d33; // red group member name
 historyPeer1NameFgSelected: historyPeer1NameFg; // red group member name in a selected message
-historyPeer1UserpicBg: #e17076; // red userpic background
+historyPeer1UserpicBg: #ff845e; // red userpic background
 historyPeer2NameFg: #4fad2d; // green group member name
 historyPeer2NameFgSelected: historyPeer2NameFg; // green group member name in a selected message
-historyPeer2UserpicBg: #7bc862; // green userpic background
-historyPeer3NameFg: #d09306; // yellow group member name
-historyPeer3NameFgSelected: historyPeer3NameFg; // yellow group member name in a selected message
-historyPeer3UserpicBg: #e5ca77; // yellow userpic background
+historyPeer2UserpicBg: #9ad164; // green userpic background
+historyPeer3NameFg: #d09306; // yellow group member name (actually unused)
+historyPeer3NameFgSelected: historyPeer3NameFg; // yellow group member name in a selected message (actually unused)
+historyPeer3UserpicBg: #e5ca77; // yellow userpic background (actually unused)
 historyPeer4NameFg: windowActiveTextFg; // blue group member name
 historyPeer4NameFgSelected: historyPeer4NameFg; // blue group member name in a selected message
-historyPeer4UserpicBg: #65aadd; // blue userpic background
+historyPeer4UserpicBg: #5caffa; // blue userpic background
 historyPeer5NameFg: #8544d6; // purple group member name
 historyPeer5NameFgSelected: historyPeer5NameFg; // purple group member name in a selected message
-historyPeer5UserpicBg: #a695e7; // purple userpic background
+historyPeer5UserpicBg: #b694f9; // purple userpic background
 historyPeer6NameFg: #cd4073; // pink group member name
 historyPeer6NameFgSelected: historyPeer6NameFg; // pink group member name in a selected message
-historyPeer6UserpicBg: #ee7aae; // pink userpic background
+historyPeer6UserpicBg: #ff8aac; // pink userpic background
 historyPeer7NameFg: #2996ad; // sea group member name
 historyPeer7NameFgSelected: historyPeer7NameFg; // sea group member name in a selected message
-historyPeer7UserpicBg: #6ec9cb; // sea userpic background
+historyPeer7UserpicBg: #5bcbe3; // sea userpic background
 historyPeer8NameFg: #ce671b; // orange group member name
 historyPeer8NameFgSelected: historyPeer8NameFg; // orange group member name in a selected message
-historyPeer8UserpicBg: #faa774; // orange userpic background
+historyPeer8UserpicBg: #febb5b; // orange userpic background
 historyPeerUserpicFg: windowFgActive; // default userpic initials
 historyPeerSavedMessagesBg: historyPeer4UserpicBg; // saved messages userpic background
 historyPeerArchiveUserpicBg: dialogsUnreadBgMuted; // archive folder userpic background
+
+historyPeer1UserpicBg2: #d45246 | historyPeer1UserpicBg; // the second red userpic background
+historyPeer2UserpicBg2: #46ba43 | historyPeer2UserpicBg; // the second green userpic background
+historyPeer3UserpicBg2: #e5ca77 | historyPeer3UserpicBg; // the second yellow userpic background (actually unused)
+historyPeer4UserpicBg2: #408acf | historyPeer4UserpicBg; // the second blue userpic background
+historyPeer5UserpicBg2: #6c61df | historyPeer5UserpicBg; // the second purple userpic background
+historyPeer6UserpicBg2: #d95574 | historyPeer6UserpicBg; // the second pink userpic background
+historyPeer7UserpicBg2: #359ad4 | historyPeer7UserpicBg; // the second sea userpic background
+historyPeer8UserpicBg2: #f68136 | historyPeer8UserpicBg; // the second orange userpic background
+historyPeerSavedMessagesBg2: historyPeer4UserpicBg2; // the second saved messages userpic background
+
+settingsIconBg1: #f06964; // red settings icon background
+settingsIconBg2: #6dc534; // green settings icon background
+settingsIconBg3: #ed9f20; // light-orange settings icon background
+settingsIconBg4: #56b3f5; // light-blue settings icon background
+settingsIconBg5: #7595ff; // dark-blue settings icon background
+settingsIconBg6: #b580e2; // purple settings icon background
+settingsIconBg8: #f2925b; // dark-orange settings icon background
+settingsIconBgArchive: #9da2b0; // archive main menu icon background
+settingsIconFg: #ffffff; // settings icon shape
 
 // Some values are marked as (adjusted), it means they're adjusted by
 // hue and saturation of the average background color if user chooses
@@ -361,7 +379,6 @@ msgFileInBg: windowBgActive; // inbox audio file download circle background
 msgFileInBgOver: #4eade3; // inbox audio file download circle background with mouse over
 msgFileInBgSelected: #51a3d3; // inbox selected audio file download circle background
 msgFileOutBg: #5fbe67; // outbox audio file download circle background
-msgFileOutBgOver: #5ab15f; // outbox audio file download circle background with mouse over
 msgFileOutBgSelected: #50ac9b; // outbox selected audio file download circle background
 
 msgFile1Bg: #72b1df; // blue shared links / files without image square thumbnail
@@ -418,11 +435,8 @@ youtubePlayIconBg: #e83131c8; // youtube play icon background (when a link to a 
 youtubePlayIconFg: windowFgActive; // youtube play icon arrow (when a link to a youtube video with a webpage preview is sent)
 videoPlayIconBg: #0000007f; // other video play icon background (like when a link to a vimeo video with a webpage preview is sent)
 videoPlayIconFg: #ffffff; // other video play icon arrow (like when a link to a vimeo video with a webpage preview is sent)
-toastBg: #000000b2; // toast notification background (like when you click on your t.me link when editing your username)
-toastFg: windowFgActive; // toast notification text (like when you click on your t.me link when editing your username)
-
-reportSpamBg: emojiPanHeaderBg; // report spam panel background (like a non contact user writes your for the first time)
-reportSpamFg: windowFg; // report spam panel text (when you send a report from that panel)
+toastBg: #2c3033e5; // toast notification background (like when you click on your t.me link when editing your username)
+toastFg: #ffffff; // toast notification text (like when you click on your t.me link when editing your username)
 
 historyToDownBg: windowBg; // arrow button background (to scroll to the end of the viewed chat)
 historyToDownBgOver: windowBgOver; // arrow button background with mouse over
@@ -455,7 +469,6 @@ mapPointDot: #ffffff; // geo location marker point
 overviewCheckBg: #00000040; // shared media / files / links checkbox background for not selected rows when some rows are selected
 overviewCheckBgActive: windowBgActive; // shared media / files / links checkbox background for selected rows
 overviewCheckBorder: windowBg; // shared media round checkbox border
-overviewCheckFg: windowBg; // shared files / links checkbox icon for not selected rows when some rows are selected
 overviewCheckFgActive: windowBg; // shared files / links checkbox icon for selected rows
 overviewPhotoSelectOverlay: #40ace333; // shared photos / videos / links fill for selected rows
 
@@ -464,9 +477,6 @@ profileStatusFgOver: #7c99b2; // group members list in group profile user last s
 profileVerifiedCheckBg: windowBgActive; // profile verified check icon background
 profileVerifiedCheckFg: windowFgActive; // profile verified check icon tick
 profileAdminStartFg: windowBgActive; // group members list creator star icon
-profileAdminStarFgOver: profileAdminStartFg; // group members list creator star icon with mouse over
-profileOtherAdminStarFg: windowSubTextFg; // group members list admin star icon
-profileOtherAdminStarFgOver: profileStatusFgOver; // group members list admin star icon with mouse over
 
 // settings
 notificationsBoxMonitorFg: windowFg; // custom notifications settings box monitor color
@@ -477,12 +487,8 @@ notificationSampleCloseFg: #d7d7d7 | windowSubTextFg; // custom notifications se
 notificationSampleTextFg: #d7d7d7 | windowSubTextFg; // custom notifications settings box small sample text placeholder
 notificationSampleNameFg: #939393 | windowSubTextFg; // custom notifications settings box small sample name placeholder
 
-changePhoneSimcardFrom: notificationSampleTextFg; // change phone number box left simcard icon
-changePhoneSimcardTo: notificationSampleNameFg; // change phone number box right simcard and plane icons
-
 mainMenuBg: windowBg; // main menu background
 mainMenuCoverBg: dialogsBgActive; // main menu top cover background
-mainMenuCoverFg: windowFgActive; // main menu top cover text
 mainMenuCloudFg: activeButtonFg; // main menu top cover saved messages / archive button icon
 mainMenuCloudBg: #2785bf | activeButtonBgRipple; // main menu top cover saved messages / archive button background
 
@@ -509,10 +515,10 @@ mediaviewMenuFg: windowFgActive; // context menu item text
 mediaviewBg: #222222eb; // Media Viewer background
 mediaviewVideoBg: imageBg; // Media Viewer background when viewing a video in full screen
 mediaviewControlBg: #0000003c; // controls background (like next photo / previous photo)
-mediaviewControlFg: windowFgActive; // controls icon (like next photo / previous photo)
+mediaviewControlFg: #ffffff; // controls icon (like next photo / previous photo)
 mediaviewCaptionBg: #11111180; // caption text background (when viewing photo with caption)
 mediaviewCaptionFg: mediaviewControlFg; // caption text
-mediaviewTextLinkFg: #91d9ff; // caption text link
+mediaviewTextLinkFg: #4db8ff; // caption text link
 mediaviewSaveMsgBg: toastBg; // save to file toast message background in Media Viewer
 mediaviewSaveMsgFg: toastFg; // save to file toast message text
 
@@ -527,7 +533,6 @@ mediaviewPlaybackIconRipple: #ffffff14; // video playback controls ripple effect
 
 mediaviewPipControlsFg: #ffffffd9; // picture-in-picture controls
 mediaviewPipControlsFgOver: #ffffff; // picture-in-picture controls with mouse over
-mediaviewPipFade: #00000095; // picture-in-picture gradient fade controls background
 mediaviewPipPlaybackActive: #ffffffda; // picture-in-picture playback progress already played part
 mediaviewPipPlaybackInactive: #ffffff26; // picture-in-picture playback progress upcoming (not played yet) part
 
@@ -589,7 +594,6 @@ groupCallVideoSubTextFg: #ffffffc0; // group call additional text over video
 callBarBg: dialogsBgActive; // active phone call bar background
 callBarMuteRipple: dialogsRippleBgActive; // active phone call bar mute and hangup button ripple effect
 callBarBgMuted: #8f8f8f | dialogsUnreadBgMuted; // phone call bar with muted mic background
-callBarUnmuteRipple: #7f7f7f | shadowFg; // phone call bar with muted mic mute and hangup button ripple effect
 callBarFg: dialogsNameFgActive; // phone call bar text and icons
 
 importantTooltipBg: toastBg; // group call important tooltip background color
@@ -641,8 +645,30 @@ sideBarBadgeFg: #ffffff; // filters side bar badge text
 
 songCoverOverlayFg: #00000066; // song cover overlay
 
-photoEditorBg: boxTitleAdditionalFg; // photo editor background
 photoEditorItemBaseHandleFg: #3ccaef; // photo editor handle circle
+
+premiumButtonBg1: #55a5ff; // upgrade to premium button gradient 1
+premiumButtonBg2: #a767ff; // upgrade to premium button gradient 2
+premiumButtonBg3: #db5c9d; // upgrade to premium button gradient 3
+premiumButtonFg: #ffffff; // upgrade to premium button text
+
+premiumIconBg1: #f38926; // icon in premium settings gradient 1
+premiumIconBg2: #e44456; // icon in premium settings gradient 2
+premiumIconBg3: #4acd43; // icon in premium settings gradient 3
+
+statisticsChartInactive: #e2eef999; // inactive area in footer of statistic charts
+statisticsChartActive: #baccd9d8; // sides in footer of statistic charts
+
+statisticsChartLineBlue: #327fe5; // represents blue color on statistical charts
+statisticsChartLineGreen: #61c752; // represents green color on statistical charts
+statisticsChartLineRed: #e05356; // represents red color on statistical charts
+statisticsChartLineGolden: #eba52d; // represents golden color on statistical charts
+statisticsChartLineLightblue: #58a8ed; // represents lightblue color on statistical charts
+statisticsChartLineLightgreen: #8fcf39; // represents lightgreen color on statistical charts
+statisticsChartLineOrange: #f28c39; // represents orange color on statistical charts
+statisticsChartLineIndigo: #7f79f3; // represents indigo color on statistical charts
+statisticsChartLinePurple: #9f79e8; // represents purple color on statistical charts
+statisticsChartLineCyan: #40d0ca; // represents cyan color on statistical charts
 
 // kotatogram
 ktgTopBarBg: topBarBg; // Kotatogram: top bar background

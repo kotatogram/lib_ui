@@ -26,7 +26,7 @@ class CrossFadeAnimation {
 public:
 	struct Data {
 		QImage full;
-		QVector<int> lineWidths;
+		std::vector<int> lineWidths;
 		QPoint position;
 		style::align align;
 		style::font font;
@@ -94,43 +94,72 @@ private:
 };
 
 class FlatLabel : public RpWidget, public ClickHandlerHost {
-
 public:
-	FlatLabel(QWidget *parent, const style::FlatLabel &st = st::defaultFlatLabel);
+	FlatLabel(
+		QWidget *parent,
+		const style::FlatLabel &st = st::defaultFlatLabel,
+		const style::PopupMenu &stMenu = st::defaultPopupMenu);
 
 	FlatLabel(
 		QWidget *parent,
 		const QString &text,
-		const style::FlatLabel &st = st::defaultFlatLabel);
+		const style::FlatLabel &st = st::defaultFlatLabel,
+		const style::PopupMenu &stMenu = st::defaultPopupMenu);
 
 	FlatLabel(
 		QWidget *parent,
 		rpl::producer<QString> &&text,
-		const style::FlatLabel &st = st::defaultFlatLabel);
+		const style::FlatLabel &st = st::defaultFlatLabel,
+		const style::PopupMenu &stMenu = st::defaultPopupMenu);
 	FlatLabel(
 		QWidget *parent,
 		rpl::producer<TextWithEntities> &&text,
-		const style::FlatLabel &st = st::defaultFlatLabel);
+		const style::FlatLabel &st = st::defaultFlatLabel,
+		const style::PopupMenu &stMenu = st::defaultPopupMenu);
 
 	void setOpacity(float64 o);
 	void setTextColorOverride(std::optional<QColor> color);
 
 	void setText(const QString &text);
-	void setMarkedText(const TextWithEntities &textWithEntities);
+	void setMarkedText(
+		const TextWithEntities &textWithEntities,
+		const std::any &context = {});
 	void setSelectable(bool selectable);
 	void setDoubleClickSelectsParagraph(bool doubleClickSelectsParagraph);
 	void setContextCopyText(const QString &copyText);
 	void setBreakEverywhere(bool breakEverywhere);
 	void setTryMakeSimilarLines(bool tryMakeSimilarLines);
+	enum class WhichAnimationsPaused {
+		None,
+		CustomEmoji,
+		Spoiler,
+		All,
+	};
+	void setAnimationsPausedCallback(Fn<WhichAnimationsPaused()> callback) {
+		_animationsPausedCallback = std::move(callback);
+	}
 
+	[[nodiscard]] int textMaxWidth() const;
 	int naturalWidth() const override;
 	QMargins getMargins() const override;
 
-	void setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk);
+	void setLink(uint16 index, const ClickHandlerPtr &lnk);
 	void setLinksTrusted();
 
 	using ClickHandlerFilter = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
 	void setClickHandlerFilter(ClickHandlerFilter &&filter);
+	void overrideLinkClickHandler(Fn<void()> handler);
+	void overrideLinkClickHandler(Fn<void(QString url)> handler);
+
+	struct ContextMenuRequest {
+		not_null<PopupMenu*> menu;
+		ClickHandlerPtr link;
+		bool hasSelection = false;
+		bool uponSelection = false;
+		bool fullSelection = false;
+	};
+	void setContextMenuHook(Fn<void(ContextMenuRequest)> hook);
+	void fillContextMenu(ContextMenuRequest request);
 
 	// ClickHandlerHost interface
 	void clickHandlerActiveChanged(const ClickHandlerPtr &action, bool active) override;
@@ -194,6 +223,7 @@ private:
 
 	Text::String _text;
 	const style::FlatLabel &_st;
+	const style::PopupMenu &_stMenu;
 	std::optional<QColor> _textColorOverride;
 	float64 _opacity = 1.;
 
@@ -226,9 +256,11 @@ private:
 	base::Timer _trippleClickTimer;
 
 	base::unique_qptr<PopupMenu> _contextMenu;
+	Fn<void(ContextMenuRequest)> _contextMenuHook;
 	QString _contextCopyText;
 
 	ClickHandlerFilter _clickHandlerFilter;
+	Fn<WhichAnimationsPaused()> _animationsPausedCallback;
 
 	// text selection and context menu by touch support (at least Windows Surface tablets)
 	bool _touchSelect = false;
@@ -238,9 +270,13 @@ private:
 
 };
 
-class DividerLabel : public PaddingWrap<FlatLabel> {
+class DividerLabel : public PaddingWrap<> {
 public:
-	using PaddingWrap::PaddingWrap;
+	DividerLabel(
+		QWidget *parent,
+		object_ptr<RpWidget> &&child,
+		const style::margins &padding,
+		RectParts parts = RectPart::Top | RectPart::Bottom);
 
 	int naturalWidth() const override;
 
@@ -248,8 +284,7 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
-	object_ptr<BoxContentDivider> _background
-		= object_ptr<BoxContentDivider>(this);
+	object_ptr<BoxContentDivider> _background;
 
 };
 

@@ -8,9 +8,11 @@
 
 #include "base/unique_qptr.h"
 #include "base/flags.h"
+#include "ui/dragging_scroll_manager.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/widgets/labels.h"
 #include "ui/layers/layer_widget.h"
+#include "ui/layers/show.h"
 #include "ui/effects/animation_value.h"
 #include "ui/text/text_entity.h"
 #include "ui/rp_widget.h"
@@ -18,12 +20,25 @@
 enum class RectPart;
 using RectParts = base::flags<RectPart>;
 
+namespace base {
+class Timer;
+} // namespace base
+
 namespace style {
 struct RoundButton;
 struct IconButton;
 struct ScrollArea;
 struct Box;
 } // namespace style
+
+namespace st {
+extern const style::ScrollArea &boxScroll;
+} // namespace st
+
+namespace Ui::Toast {
+struct Config;
+class Instance;
+} // namespace Ui::Toast
 
 namespace Ui {
 class GenericBox;
@@ -37,6 +52,7 @@ inline object_ptr<BoxType> Box(Args &&...args) {
 
 namespace Ui {
 
+class AbstractButton;
 class RoundButton;
 class IconButton;
 class ScrollArea;
@@ -54,17 +70,9 @@ public:
 	virtual void setCloseByOutsideClick(bool close) = 0;
 
 	virtual void clearButtons() = 0;
-	virtual QPointer<RoundButton> addButton(
-		rpl::producer<QString> text,
-		Fn<void()> clickCallback,
-		const style::RoundButton &st) = 0;
-	virtual QPointer<RoundButton> addLeftButton(
-		rpl::producer<QString> text,
-		Fn<void()> clickCallback,
-		const style::RoundButton &st) = 0;
-	virtual QPointer<IconButton> addTopButton(
-		const style::IconButton &st,
-		Fn<void()> clickCallback) = 0;
+	virtual void addButton(object_ptr<AbstractButton> button) = 0;
+	virtual void addLeftButton(object_ptr<AbstractButton> button) = 0;
+	virtual void addTopButton(object_ptr<AbstractButton> button) = 0;
 	virtual void showLoading(bool show) = 0;
 	virtual void updateButtonsPositions() = 0;
 
@@ -79,6 +87,7 @@ public:
 	virtual void setNoContentMargin(bool noContentMargin) = 0;
 	virtual bool isBoxShown() const = 0;
 	virtual void closeBox() = 0;
+	virtual void hideLayer() = 0;
 	virtual void triggerButton(int index) = 0;
 
 	template <typename BoxType>
@@ -91,13 +100,12 @@ public:
 		return result;
 	}
 
+	virtual ShowFactory showFactory() = 0;
 	virtual QPointer<QWidget> outerContainer() = 0;
 
 };
 
 class BoxContent : public RpWidget {
-	Q_OBJECT
-
 public:
 	BoxContent() {
 		setAttribute(Qt::WA_OpaquePaintEvent);
@@ -135,40 +143,31 @@ public:
 	void clearButtons() {
 		getDelegate()->clearButtons();
 	}
+	QPointer<AbstractButton> addButton(object_ptr<AbstractButton> button);
 	QPointer<RoundButton> addButton(
+		rpl::producer<QString> text,
+		Fn<void()> clickCallback = nullptr);
+	QPointer<RoundButton> addButton(
+		rpl::producer<QString> text,
+		const style::RoundButton &st);
+	QPointer<RoundButton> addButton(
+		rpl::producer<QString> text,
+		Fn<void()> clickCallback,
+		const style::RoundButton &st);
+	QPointer<AbstractButton> addLeftButton(
+		object_ptr<AbstractButton> button);
+	QPointer<RoundButton> addLeftButton(
 		rpl::producer<QString> text,
 		Fn<void()> clickCallback = nullptr);
 	QPointer<RoundButton> addLeftButton(
 		rpl::producer<QString> text,
-		Fn<void()> clickCallback = nullptr);
+		Fn<void()> clickCallback,
+		const style::RoundButton& st);
+	QPointer<AbstractButton> addTopButton(
+		object_ptr<AbstractButton> button);
 	QPointer<IconButton> addTopButton(
-			const style::IconButton &st,
-			Fn<void()> clickCallback = nullptr) {
-		return getDelegate()->addTopButton(st, std::move(clickCallback));
-	}
-	QPointer<RoundButton> addButton(
-			rpl::producer<QString> text,
-			const style::RoundButton &st) {
-		return getDelegate()->addButton(std::move(text), nullptr, st);
-	}
-	QPointer<RoundButton> addButton(
-			rpl::producer<QString> text,
-			Fn<void()> clickCallback,
-			const style::RoundButton &st) {
-		return getDelegate()->addButton(
-			std::move(text),
-			std::move(clickCallback),
-			st);
-	}
-	QPointer<RoundButton> addLeftButton(
-			rpl::producer<QString> text,
-			Fn<void()> clickCallback,
-			const style::RoundButton& st) {
-		return getDelegate()->addLeftButton(
-			std::move(text),
-			std::move(clickCallback),
-			st);
-	}
+		const style::IconButton &st,
+		Fn<void()> clickCallback = nullptr);
 	void showLoading(bool show) {
 		getDelegate()->showLoading(show);
 	}
@@ -196,6 +195,9 @@ public:
 		prepare();
 		finishPrepare();
 	}
+	[[nodiscard]] bool hasDelegate() const {
+		return _delegate != nullptr;
+	}
 	[[nodiscard]] not_null<BoxContentDelegate*> getDelegate() const {
 		return _delegate;
 	}
@@ -210,8 +212,21 @@ public:
 
 	void scrollByDraggingDelta(int delta);
 
-public Q_SLOTS:
-	void onScrollToY(int top, int bottom = -1);
+	void scrollToY(int top, int bottom = -1);
+	void sendScrollViewportEvent(not_null<QEvent*> event);
+	[[nodiscard]] rpl::producer<> scrolls() const;
+	[[nodiscard]] int scrollTop() const;
+	[[nodiscard]] int scrollHeight() const;
+
+	base::weak_ptr<Toast::Instance> showToast(Toast::Config &&config);
+	base::weak_ptr<Toast::Instance> showToast(
+		TextWithEntities &&text,
+		crl::time duration = 0);
+	base::weak_ptr<Toast::Instance> showToast(
+		const QString &text,
+		crl::time duration = 0);
+
+	[[nodiscard]] std::shared_ptr<Show> uiShow();
 
 protected:
 	virtual void prepare() = 0;
@@ -260,11 +275,11 @@ protected:
 			object_ptr<Widget> inner,
 			int topSkip = 0,
 			int bottomSkip = 0) {
-		auto result = QPointer<Widget>(inner.data());
-		setInnerTopSkip(topSkip);
-		setInnerBottomSkip(bottomSkip);
-		setInner(std::move(inner));
-		return result;
+		return setInnerWidget(
+			std::move(inner),
+			st::boxScroll,
+			topSkip,
+			bottomSkip);
 	}
 
 	template <typename Widget>
@@ -280,20 +295,13 @@ protected:
 	void paintEvent(QPaintEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
 
-private Q_SLOTS:
-	void onScroll();
-	void onInnerResize();
-
-	void onDraggingScrollTimer();
-
 private:
 	void finishPrepare();
 	void finishScrollCreate();
-	void setInner(object_ptr<TWidget> inner);
 	void setInner(object_ptr<TWidget> inner, const style::ScrollArea &st);
 	void updateScrollAreaGeometry();
 	void updateInnerVisibleTopBottom();
-	void updateShadowsVisibility();
+	void updateShadowsVisibility(anim::type animated = anim::type::normal);
 	object_ptr<TWidget> doTakeInnerWidget();
 
 	BoxContentDelegate *_delegate = nullptr;
@@ -309,8 +317,7 @@ private:
 	object_ptr<FadeShadow> _topShadow = { nullptr };
 	object_ptr<FadeShadow> _bottomShadow = { nullptr };
 
-	object_ptr<QTimer> _draggingScrollTimer = { nullptr };
-	int _draggingScrollDelta = 0;
+	Ui::DraggingScrollManager _draggingScroll;
 
 	rpl::event_stream<> _boxClosingStream;
 

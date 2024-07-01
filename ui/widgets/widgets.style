@@ -212,6 +212,12 @@ PanelAnimation {
 	shadow: Shadow;
 }
 
+MenuSeparator {
+	padding: margins;
+	width: pixels;
+	fg: color;
+}
+
 Menu {
 	skip: pixels;
 
@@ -224,15 +230,14 @@ Menu {
 	itemFgShortcutOver: color;
 	itemFgShortcutDisabled: color;
 	itemPadding: margins;
+	itemRightSkip: pixels;
 	itemIconPosition: point;
 	itemStyle: TextStyle;
 	itemToggle: Toggle;
 	itemToggleOver: Toggle;
 	itemToggleShift: pixels;
 
-	separatorPadding: margins;
-	separatorWidth: pixels;
-	separatorFg: color;
+	separator: MenuSeparator;
 
 	arrow: icon;
 
@@ -250,36 +255,14 @@ PopupMenu {
 
 	menu: Menu;
 
+	radius: pixels;
 	duration: int;
 	showDuration: int;
 }
 
-FlatInput {
-	textColor: color;
-	bgColor: color;
-	bgActive: color;
-	width: pixels;
-	height: pixels;
-	textMrg: margins;
-	align: align;
-	font: font;
-
-	icon: icon;
-
-	borderWidth: pixels;
-	borderColor: color;
-	borderActive: color;
-
-	phColor: color;
-	phFocusColor: color;
-	phPos: point;
-	phAlign: align;
-	phShift: pixels;
-	phDuration: int;
-}
-
 InputField {
 	textBg: color;
+	textBgActive: color; // Used only with borderRadius.
 	textFg: color;
 	textMargins: margins;
 	textAlign: align;
@@ -301,6 +284,8 @@ InputField {
 
 	border: pixels;
 	borderActive: pixels;
+	borderRadius: pixels;
+	borderDenominator: int;
 
 	font: font;
 	menu: PopupMenu;
@@ -336,6 +321,18 @@ IconButton {
 	rippleAreaPosition: point;
 	rippleAreaSize: pixels;
 	ripple: RippleAnimation;
+}
+
+IconButtonWithText {
+	iconButton: IconButton;
+	height: pixels;
+
+	textFg: color;
+	textFgOver: color;
+	textPadding: margins;
+	textAlign: align;
+
+	font: font;
 }
 
 MediaSlider {
@@ -374,6 +371,7 @@ RoundCheckbox {
 }
 
 RoundImageCheckbox {
+	selectExtendTwice: pixels;
 	imageRadius: pixels;
 	imageSmallRadius: pixels;
 	selectWidth: pixels;
@@ -386,7 +384,7 @@ CrossAnimation {
 	fg: color;
 	size: pixels;
 	skip: pixels;
-	stroke: pixels;
+	stroke: double;
 	minScale: double;
 }
 
@@ -520,11 +518,12 @@ SettingsButton {
 	textBg: color;
 	textBgOver: color;
 
-	font: font;
+	style: TextStyle;
 	rightLabel: FlatLabel;
 
 	height: pixels;
 	padding: margins;
+	iconLeft: pixels;
 
 	toggle: Toggle;
 	toggleOver: Toggle;
@@ -559,6 +558,8 @@ WindowTitle {
 	bgActive: color;
 	fg: color;
 	fgActive: color;
+	shadow: bool;
+	style: TextStyle;
 	minimize: IconButton;
 	minimizeIconActive: icon;
 	minimizeIconActiveOver: icon;
@@ -612,6 +613,16 @@ Toast {
 	durationSlide: int;
 }
 
+Table {
+	bg: color;
+	headerBg: color;
+	borderFg: color;
+	border: pixels;
+	radius: pixels;
+	labelMinWidth: pixels;
+	labelMaxWidth: double;
+}
+
 defaultLabelSimple: LabelSimple {
 	font: normalFont;
 	maxWidth: 0px;
@@ -631,13 +642,22 @@ defaultLinkButton: LinkButton {
 	color: windowActiveTextFg;
 	overColor: windowActiveTextFg;
 	font: linkFont;
-	overFont: linkOverFont;
+	overFont: linkFontOver;
 }
 
 defaultRippleAnimation: RippleAnimation {
 	color: windowBgRipple;
 	showDuration: 650;
 	hideDuration: 200;
+}
+
+defaultTable: Table {
+	bg: windowBg;
+	headerBg: windowBgOver;
+	borderFg: inputBorderFg;
+	border: 1px;
+	radius: 6px;
+	labelMaxWidth: 0.5;
 }
 
 emptyRippleAnimation: RippleAnimation {
@@ -704,6 +724,7 @@ defaultScrollArea: ScrollArea {
 	duration: 150;
 	hiding: 1000;
 }
+scrollBarMin: 40px;
 
 defaultSolidScroll: ScrollArea(defaultScrollArea) {
 	deltax: 5px;
@@ -712,29 +733,6 @@ defaultSolidScroll: ScrollArea(defaultScrollArea) {
 	deltab: 6px;
 
 	hiding: 0;
-}
-
-defaultInputFont: font(17px);
-defaultFlatInput: FlatInput {
-	textColor: windowFg;
-	bgColor: filterInputInactiveBg;
-	bgActive: filterInputActiveBg;
-	width: 210px;
-	height: 40px;
-	align: align(left);
-	textMrg: margins(5px, 5px, 5px, 5px);
-	font: defaultInputFont;
-
-	borderWidth: 2px;
-	borderColor: filterInputInactiveBg;
-	borderActive: filterInputBorderFg;
-
-	phColor: placeholderFg;
-	phFocusColor: placeholderFgActive;
-	phAlign: align(left);
-	phPos: point(2px, 0px);
-	phShift: 50px;
-	phDuration: 100;
 }
 
 defaultCheckboxIcon: icon {{ "default_checkbox_check", overviewCheckFgActive, point(4px, 7px) }};
@@ -826,12 +824,17 @@ defaultPanelAnimation: PanelAnimation {
 	shadow: defaultRoundShadow;
 }
 
-defaultMenuArrow: icon {{ "dropdown_submenu_arrow", menuSubmenuArrowFg }};
+defaultMenuArrow: icon {{ "menu/submenu_arrow", windowBoldFg }};
 defaultMenuToggle: Toggle(defaultToggle) {
 	untoggledFg: menuIconFg;
 }
 defaultMenuToggleOver: Toggle(defaultToggle) {
 	untoggledFg: menuIconFgOver;
+}
+defaultMenuSeparator: MenuSeparator {
+	padding: margins(0px, 5px, 0px, 5px);
+	width: 1px;
+	fg: menuSeparatorFg;
 }
 defaultMenu: Menu {
 	skip: 0px;
@@ -846,14 +849,13 @@ defaultMenu: Menu {
 	itemFgShortcutDisabled: menuFgDisabled;
 	itemIconPosition: point(0px, 0px);
 	itemPadding: margins(17px, 8px, 17px, 7px);
+	itemRightSkip: 6px;
 	itemStyle: defaultTextStyle;
 	itemToggle: defaultMenuToggle;
 	itemToggleOver: defaultMenuToggleOver;
 	itemToggleShift: 0px;
 
-	separatorPadding: margins(0px, 5px, 0px, 5px);
-	separatorWidth: 1px;
-	separatorFg: menuSeparatorFg;
+	separator: defaultMenuSeparator;
 
 	arrow: defaultMenuArrow;
 
@@ -871,14 +873,16 @@ defaultPopupMenu: PopupMenu {
 
 	menu: defaultMenu;
 
+	radius: 3px;
 	duration: 150;
 	showDuration: 200;
 }
 
 defaultInputField: InputField {
 	textBg: windowBg;
+	textBgActive: windowBg;
 	textFg: windowFg;
-	textMargins: margins(0px, 26px, 0px, 4px);
+	textMargins: margins(0px, 28px, 0px, 4px);
 	textAlign: align(topleft);
 
 	placeholderFg: windowSubTextFg;
@@ -897,11 +901,13 @@ defaultInputField: InputField {
 
 	border: 1px;
 	borderActive: 2px;
+	borderRadius: 0px;
+	borderDenominator: 1;
 
 	font: boxTextFont;
 	menu: defaultPopupMenu;
 
-	heightMin: 52px;
+	heightMin: 55px;
 	heightMax: 148px;
 }
 
@@ -922,7 +928,7 @@ defaultMultiSelectItem: MultiSelectItem {
 	deleteCross: CrossAnimation {
 		size: 32px;
 		skip: 10px;
-		stroke: 2px;
+		stroke: 1.5;
 		minScale: 0.3;
 	}
 	duration: 150;
@@ -948,7 +954,6 @@ defaultMultiSelectSearchField: InputField(defaultInputField) {
 	font: normalFont;
 }
 
-fieldSearchIcon: icon {{ "box_search", menuIconFg, point(9px, 8px) }};
 boxFieldSearchIcon: icon {{ "box_search", menuIconFg, point(10px, 9px) }};
 
 defaultMultiSelectSearchCancel: CrossButton {
@@ -958,7 +963,7 @@ defaultMultiSelectSearchCancel: CrossButton {
 	cross: CrossAnimation {
 		size: 36px;
 		skip: 12px;
-		stroke: 2px;
+		stroke: 1.5;
 		minScale: 0.3;
 	}
 	crossFg: boxTitleCloseFg;
@@ -996,7 +1001,6 @@ defaultMultiSelect: MultiSelect {
 	fieldCancelSkip: 40px;
 }
 
-widgetSlideDuration: 200;
 widgetFadeDuration: 200;
 
 SettingsSlider {
@@ -1004,8 +1008,10 @@ SettingsSlider {
 	barTop: pixels;
 	barSkip: pixels;
 	barStroke: pixels;
+	barRadius: pixels;
 	barFg: color;
 	barFgActive: color;
+	barSnapToLabel: bool;
 	labelTop: pixels;
 	labelStyle: TextStyle;
 	labelFg: color;
@@ -1022,6 +1028,7 @@ defaultSettingsSlider: SettingsSlider {
 	barTop: 5px;
 	barSkip: 3px;
 	barStroke: 3px;
+	barRadius: 1px;
 	barFg: sliderBgInactive;
 	barFgActive: sliderBgActive;
 	labelTop: 17px;
@@ -1032,11 +1039,14 @@ defaultSettingsSlider: SettingsSlider {
 }
 
 defaultTabsSlider: SettingsSlider(defaultSettingsSlider) {
-	height: 53px;
-	barTop: 50px;
+	height: 43px;
+	barTop: 40px;
 	barSkip: 0px;
+	barStroke: 6px;
+	barRadius: 2px;
 	barFg: transparent;
-	labelTop: 19px;
+	barSnapToLabel: true;
+	labelTop: 12px;
 	labelStyle: semiboldTextStyle;
 	labelFg: windowSubTextFg;
 	labelFgActive: lightButtonFg;
@@ -1080,6 +1090,7 @@ defaultPeerListCheck: RoundCheckbox(defaultRoundCheckbox) {
 	check: defaultPeerListCheckIcon;
 }
 defaultPeerListCheckbox: RoundImageCheckbox {
+	selectExtendTwice: 0px;
 	imageRadius: 21px;
 	imageSmallRadius: 18px;
 	selectWidth: 2px;
@@ -1123,9 +1134,9 @@ defaultTooltip: Tooltip {
 defaultImportantTooltip: ImportantTooltip {
 	bg: importantTooltipBg;
 	margin: margins(4px, 4px, 4px, 4px);
-	padding: margins(13px, 9px, 13px, 10px);
-	radius: 6px;
-	arrow: 9px;
+	padding: margins(10px, 3px, 10px, 5px);
+	radius: 4px;
+	arrow: 4px;
 	arrowSkipMin: 24px;
 	arrowSkip: 66px;
 	shift: 12px;
@@ -1134,15 +1145,14 @@ defaultImportantTooltip: ImportantTooltip {
 
 defaultImportantTooltipLabel: FlatLabel(defaultFlatLabel) {
 	style: TextStyle(defaultTextStyle) {
-		font: font(14px);
-		linkFont: font(14px);
-		linkFontOver: font(14px underline);
+		font: font(11px);
 	}
 	textFg: importantTooltipFg;
 	palette: TextPalette(defaultTextPalette) {
 		linkFg: importantTooltipFgLink;
 		selectLinkFg: importantTooltipFgLink;
 	}
+	minWidth: 36px;
 }
 
 BotKeyboardButton {
@@ -1196,21 +1206,6 @@ historySendActionChooseStickerEyeWidth: 7px;
 historySendActionChooseStickerEyeHeight: 11px;
 historySendActionChooseStickerEyeStep: 2px;
 
-MediaPlayerButton {
-	playPosition: point;
-	playOuter: size;
-	pausePosition: point;
-	pauseOuter: size;
-	pauseStroke: pixels;
-	cancelPosition: point;
-	cancelOuter: size;
-	cancelStroke: pixels;
-
-	rippleAreaPosition: point;
-	rippleAreaSize: pixels;
-	ripple: RippleAnimation;
-}
-
 PeerListItem {
 	left: pixels;
 	bottom: pixels;
@@ -1258,11 +1253,7 @@ defaultPeerListItem: PeerListItem {
 	height: 58px;
 	photoPosition: point(12px, 6px);
 	namePosition: point(68px, 11px);
-	nameStyle: TextStyle(defaultTextStyle) {
-		font: semiboldFont;
-		linkFont: semiboldFont;
-		linkFontOver: semiboldFont;
-	}
+	nameStyle: semiboldTextStyle;
 	nameFg: contactsNameFg;
 	nameFgChecked: windowActiveTextFg;
 	statusPosition: point(68px, 31px);
@@ -1277,8 +1268,6 @@ defaultPeerListItem: PeerListItem {
 
 boxTextStyle: TextStyle(defaultTextStyle) {
 	font: font(boxFontSize);
-	linkFont: font(boxFontSize);
-	linkFontOver: font(boxFontSize underline);
 }
 
 defaultPeerListAbout: FlatLabel(defaultFlatLabel) {
@@ -1305,22 +1294,6 @@ SearchFieldRow {
 	fieldIconSkip: pixels;
 	fieldCancel: CrossButton;
 	fieldCancelSkip: pixels;
-}
-
-InfoTopBar {
-	height: pixels;
-	back: IconButton;
-	title: FlatLabel;
-	titlePosition: point;
-	bg: color;
-	mediaCancel: IconButton;
-	mediaActionsSkip: pixels;
-	mediaForward: IconButton;
-	mediaDelete: IconButton;
-	search: IconButton;
-	searchRow: SearchFieldRow;
-	highlightBg: color;
-	highlightDuration: int;
 }
 
 LevelMeter {
@@ -1391,7 +1364,7 @@ defaultSettingsButton: SettingsButton {
 	textBg: windowBg;
 	textBgOver: windowBgOver;
 
-	font: boxTextFont;
+	style: boxTextStyle;
 	rightLabel: defaultSettingsRightLabel;
 
 	height: 20px;
@@ -1431,7 +1404,10 @@ defaultToast: Toast {
 	durationSlide: 160;
 }
 
-shakeShift: 4px;
+defaultMultilineToast: Toast(defaultToast) {
+	minWidth: 160px;
+	maxWidth: 360px;
+}
 
 // Windows specific title
 
@@ -1453,6 +1429,10 @@ defaultWindowTitle: WindowTitle {
 	bgActive: titleBgActive;
 	fg: titleFg;
 	fgActive: titleFgActive;
+	style: TextStyle(defaultTextStyle) {
+		font: font(semibold 12px);
+	}
+	shadow: true;
 	minimize: IconButton(windowTitleButton) {
 		icon: icon {
 			{ windowTitleButtonSize, titleButtonBg },
@@ -1540,4 +1520,41 @@ callShadow: Shadow {
 	bottomLeft: icon {{ "calls/call_shadow_top_left-flip_vertical", windowShadowFg }};
 	extend: margins(9px, 8px, 9px, 10px);
 	fallback: windowShadowFgFallback;
+}
+
+sideBarButtonLockArcOffset: 2px;
+sideBarButtonLockSize: size(9px, 10px);
+sideBarButtonLockArcHeight: 3px;
+sideBarButtonLockBlockHeight: 5px;
+sideBarButtonLockPenWidth: 3px;
+sideBarButtonLockPenWidthDivider: 2;
+
+menuIconColor: windowBoldFg;
+menuIconAttentionColor: attentionButtonFg;
+
+menuIconSubmenuArrow: defaultMenuArrow;
+
+menuWithIcons: Menu(defaultMenu) {
+	itemIconPosition: point(15px, 5px);
+	itemPadding: margins(54px, 8px, 17px, 8px);
+
+	arrow: menuIconSubmenuArrow;
+}
+menuWithIconsAttention: Menu(menuWithIcons) {
+	itemFg: attentionButtonFg;
+	itemFgOver: attentionButtonFgOver;
+}
+popupMenuWithIcons: PopupMenu(defaultPopupMenu) {
+	scrollPadding: margins(0px, 5px, 0px, 5px);
+	menu: menuWithIcons;
+}
+dropdownMenuWithIcons: DropdownMenu(defaultDropdownMenu) {
+	wrap: InnerDropdown(defaultInnerDropdown) {
+		scrollPadding: margins(0px, 5px, 0px, 5px);
+	}
+	menu: menuWithIcons;
+}
+
+universalRippleAnimation: RippleAnimation(defaultRippleAnimation) {
+	color: shadowFg;
 }

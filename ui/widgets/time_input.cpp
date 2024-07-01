@@ -6,9 +6,9 @@
 //
 #include "ui/widgets/time_input.h"
 
-#include "ui/widgets/input_fields.h"
-#include "ui/ui_utility.h"
-#include "base/qt/qt_common_adapters.h"
+#include "ui/widgets/fields/time_part_input.h"
+#include "base/qt/qt_string_view.h"
+#include "base/invoke_queued.h"
 
 #include <QtCore/QRegularExpression>
 #include <QTime>
@@ -17,8 +17,9 @@ namespace Ui {
 namespace {
 
 QTime ValidateTime(const QString &value) {
-	const auto match = QRegularExpression(
-		"^(\\d{1,2})\\:(\\d\\d)$").match(value);
+	static const auto RegExp = QRegularExpression(
+		"^(\\d{1,2})\\:(\\d\\d)$");
+	const auto match = RegExp.match(value);
 	if (!match.hasMatch()) {
 		return QTime();
 	}
@@ -47,143 +48,6 @@ QString GetMinute(const QString &value) {
 }
 
 } // namespace
-
-class TimePart final : public MaskedInputField {
-public:
-	using MaskedInputField::MaskedInputField;
-
-	void setMaxValue(int value);
-	void setWheelStep(int value);
-
-	rpl::producer<> erasePrevious() const;
-	rpl::producer<QChar> putNext() const;
-
-protected:
-	void keyPressEvent(QKeyEvent *e) override;
-	void wheelEvent(QWheelEvent *e) override;
-
-	void correctValue(
-		const QString &was,
-		int wasCursor,
-		QString &now,
-		int &nowCursor) override;
-
-private:
-	int _maxValue = 0;
-	int _maxDigits = 0;
-	int _wheelStep = 0;
-	rpl::event_stream<> _erasePrevious;
-	rpl::event_stream<QChar> _putNext;
-
-};
-
-std::optional<int> Number(not_null<TimePart*> field) {
-	const auto text = field->getLastText();
-	auto view = QStringView(text);
-	while (view.size() > 1 && view.at(0) == '0') {
-		view = base::StringViewMid(view, 1);
-	}
-	return QRegularExpression("^\\d+$").match(view).hasMatch()
-		? std::make_optional(view.toInt())
-		: std::nullopt;
-}
-
-void TimePart::setMaxValue(int value) {
-	_maxValue = value;
-	_maxDigits = 0;
-	while (value > 0) {
-		++_maxDigits;
-		value /= 10;
-	}
-}
-
-void TimePart::setWheelStep(int value) {
-	_wheelStep = value;
-}
-
-rpl::producer<> TimePart::erasePrevious() const {
-	return _erasePrevious.events();
-}
-
-rpl::producer<QChar> TimePart::putNext() const {
-	return _putNext.events();
-}
-
-void TimePart::keyPressEvent(QKeyEvent *e) {
-	const auto isBackspace = (e->key() == Qt::Key_Backspace);
-	const auto isBeginning = (cursorPosition() == 0);
-	if (isBackspace && isBeginning && !hasSelectedText()) {
-		_erasePrevious.fire({});
-	} else {
-		MaskedInputField::keyPressEvent(e);
-	}
-}
-
-void TimePart::wheelEvent(QWheelEvent *e) {
-	const auto direction = WheelDirection(e);
-	const auto now = Number(this);
-	if (!now.has_value()) {
-		return;
-	}
-	auto time = *now + (direction * _wheelStep);
-	const auto max = _maxValue + 1;
-	if (time < 0) {
-		time += max;
-	} else if (time >= max) {
-		time -= max;
-	}
-	setText(QString::number(time));
-}
-
-void TimePart::correctValue(
-		const QString &was,
-		int wasCursor,
-		QString &now,
-		int &nowCursor) {
-	auto newText = QString();
-	auto newCursor = -1;
-	const auto oldCursor = nowCursor;
-	const auto oldLength = now.size();
-	auto accumulated = 0;
-	auto limit = 0;
-	for (; limit != oldLength; ++limit) {
-		if (now[limit].isDigit()) {
-			accumulated *= 10;
-			accumulated += (now[limit].unicode() - '0');
-			if (accumulated > _maxValue || limit == _maxDigits) {
-				break;
-			}
-		}
-	}
-	for (auto i = 0; i != limit;) {
-		if (now[i].isDigit()) {
-			newText += now[i];
-		}
-		if (++i == oldCursor) {
-			newCursor = newText.size();
-		}
-	}
-	if (newCursor < 0) {
-		newCursor = newText.size();
-	}
-	if (newText != now) {
-		now = newText;
-		setText(now);
-		startPlaceholderAnimation();
-	}
-	if (newCursor != nowCursor) {
-		nowCursor = newCursor;
-		setCursorPosition(nowCursor);
-	}
-	if (accumulated > _maxValue
-		|| (limit == _maxDigits && oldLength > _maxDigits)) {
-		if (oldCursor > limit) {
-			_putNext.fire('0' + (accumulated % 10));
-		} else {
-			_putNext.fire(0);
-		}
-	}
-}
 
 TimeInput::TimeInput(
 	QWidget *parent,
@@ -284,7 +148,8 @@ void TimeInput::putNext(const object_ptr<TimePart> &field, QChar ch) {
 		field->setText(ch + field->getLastText());
 		field->setCursorPosition(1);
 	}
-	field->setFocus();
+	field->onTextEdited();
+	setFocusQueued(field);
 }
 
 void TimeInput::erasePrevious(const object_ptr<TimePart> &field) {
@@ -293,7 +158,37 @@ void TimeInput::erasePrevious(const object_ptr<TimePart> &field) {
 		field->setCursorPosition(text.size() - 1);
 		field->setText(text.mid(0, text.size() - 1));
 	}
-	field->setFocus();
+	setFocusQueued(field);
+}
+
+void TimeInput::setFocusQueued(const object_ptr<TimePart> &field) {
+	// There was a "Stack Overflow" crash in some input method handling.
+	//
+	// See https://github.com/telegramdesktop/tdesktop/issues/25129
+	//
+	// The stack is something like:
+	//
+	// ...
+	// QApplicationPrivate::sendMouseEvent
+	// ----
+	// QWidget::setFocus
+	// QWindow::focusObjectChanged
+	// QWindowsInputContext::setFocusObject
+	// QWindowsInputContext::reset
+	// QLineEdit::inputMethodEvent
+	// QWidgetLineControl::finishChange
+	// QLineEdit::textEdited
+	// MaskedInputField::onTextEdited
+	// TimePart::correctValue
+	// TimeInput::putNext
+	// ----
+	// QWidget::setFocus
+	// QWindow::focusObjectChanged
+	// ...
+	//
+	// So we try to break this loop by focusing the widget async.
+	const auto raw = field.data();
+	InvokeQueued(raw, [raw] { raw->setFocus(); });
 }
 
 bool TimeInput::setFocusFast() {
@@ -306,11 +201,11 @@ bool TimeInput::setFocusFast() {
 }
 
 std::optional<int> TimeInput::hour() const {
-	return Number(_hour);
+	return _hour->number();
 }
 
 std::optional<int> TimeInput::minute() const {
-	return Number(_minute);
+	return _minute->number();
 }
 
 QString TimeInput::valueCurrent() const {
@@ -333,7 +228,7 @@ rpl::producer<> TimeInput::focuses() const {
 }
 
 void TimeInput::paintEvent(QPaintEvent *e) {
-	Painter p(this);
+	auto p = QPainter(this);
 
 	const auto &_st = _stDateField;
 	const auto height = _st.heightMin;

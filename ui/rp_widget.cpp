@@ -6,10 +6,71 @@
 //
 #include "ui/rp_widget.h"
 
+#include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
+#include "ui/gl/gl_detection.h"
 
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
+#include <QtGui/QColorSpace>
+#include <private/qwidget_p.h>
+
+// Patching out this code without patching out all other private API usage
+// and the Qt::{Core,Gui,Widgets}Private cmake dependency is asking
+// for memory corruption
+class TWidgetPrivate : public QWidgetPrivate {
+public:
+#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
+	TWidgetPrivate(int version = QObjectPrivateVersion)
+	: QWidgetPrivate(version) {
+		[[maybe_unused]] static const auto Once = [] {
+			if (::Platform::IsWayland()
+				&& Ui::GL::ChooseBackendDefault(
+						Ui::GL::CheckCapabilities(nullptr, true))
+					== Ui::GL::Backend::OpenGL) {
+				qApp->setProperty("_q_widgets_highdpi_downscale", true);
+				WaylandGL = true;
+			}
+			return true;
+		}();
+	}
+
+	QPlatformBackingStoreRhiConfig rhiConfig() const override {
+		const auto q = static_cast<TWidget*>(q_ptr);
+		if (!q->testAttribute(Qt::WA_WState_Created)
+			|| (!q->testAttribute(Qt::WA_NativeWindow)
+				&& !q->isWindow())) {
+			return QWidgetPrivate::rhiConfig();
+		}
+		if (const auto config = q->rhiConfig()) {
+			return *config;
+		}
+		// fix flickering on GNOME
+		if (WaylandGL) {
+			return { QPlatformBackingStoreRhiConfig::OpenGL };
+		}
+		return QWidgetPrivate::rhiConfig();
+	}
+#endif // Qt >= 6.4.0
+
+private:
+	static bool WaylandGL;
+};
+
+bool TWidgetPrivate::WaylandGL = false;
+
+TWidget::TWidget(QWidget *parent)
+: TWidgetHelper<QWidget>(*(new TWidgetPrivate), parent, {}) {
+	[[maybe_unused]] static const auto Once = [] {
+		auto format = QSurfaceFormat::defaultFormat();
+		format.setSwapInterval(0);
+#ifdef Q_OS_MAC
+		format.setColorSpace(QColorSpace::SRgb);
+#endif // Q_OS_MAC
+		QSurfaceFormat::setDefaultFormat(format);
+		return true;
+	}();
+}
 
 namespace Ui {
 namespace {
@@ -39,7 +100,8 @@ void ToggleChildrenVisibility(not_null<QWidget*> widget, bool visible) {
 
 void ResizeFitChild(
 		not_null<RpWidget*> parent,
-		not_null<RpWidget*> child) {
+		not_null<RpWidget*> child,
+		int heightMin) {
 	parent->widthValue(
 	) | rpl::start_with_next([=](int width) {
 		child->resizeToWidth(width);
@@ -47,7 +109,7 @@ void ResizeFitChild(
 
 	child->heightValue(
 	) | rpl::start_with_next([=](int height) {
-		parent->resize(parent->width(), height);
+		parent->resize(parent->width(), std::max(height, heightMin));
 	}, child->lifetime());
 }
 

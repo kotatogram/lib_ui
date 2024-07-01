@@ -6,11 +6,15 @@
 //
 #include "ui/layers/layer_widget.h"
 
+#include "ui/cached_special_layer_shadow_corners.h"
 #include "ui/layers/box_layer_widget.h"
 #include "ui/widgets/shadow.h"
 #include "ui/image/image_prepare.h"
+#include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "ui/round_rect.h"
+#include "base/qt/qt_tab_key.h"
+#include "base/integration.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
 #include "styles/palette.h"
@@ -21,7 +25,7 @@ namespace Ui {
 
 class LayerStackWidget::BackgroundWidget : public TWidget {
 public:
-	explicit BackgroundWidget(QWidget *parent);
+	using TWidget::TWidget;
 
 	void setDoneCallback(Fn<void()> callback) {
 		_doneCallback = std::move(callback);
@@ -63,12 +67,12 @@ private:
 	int _mainMenuCacheWidth = 0;
 	QPixmap _specialLayerCache;
 	QPixmap _layerCache;
-	RoundRect _roundRect;
 
 	Fn<void()> _doneCallback;
 
 	bool _wasAnimating = false;
 	bool _inPaintEvent = false;
+	bool _repaintIssued = false;
 	Ui::Animations::Simple _a_shown;
 	Ui::Animations::Simple _a_mainMenuShown;
 	Ui::Animations::Simple _a_specialLayerShown;
@@ -84,11 +88,6 @@ private:
 
 };
 
-LayerStackWidget::BackgroundWidget::BackgroundWidget(QWidget *parent)
-: TWidget(parent)
-, _roundRect(ImageRoundRadius::Small, st::boxBg) {
-}
-
 void LayerStackWidget::BackgroundWidget::setCacheImages(
 		QPixmap &&bodyCache,
 		QPixmap &&mainMenuCache,
@@ -100,6 +99,7 @@ void LayerStackWidget::BackgroundWidget::setCacheImages(
 	_layerCache = std::move(layerCache);
 	_specialLayerCacheBox = _specialLayerBox;
 	_layerCacheBox = _layerBox;
+	_repaintIssued = false;
 	setAttribute(Qt::WA_OpaquePaintEvent, !_bodyCache.isNull());
 }
 
@@ -145,6 +145,7 @@ void LayerStackWidget::BackgroundWidget::startAnimation(Action action) {
 }
 
 void LayerStackWidget::BackgroundWidget::skipAnimation(Action action) {
+	_repaintIssued = false;
 	startAnimation(action);
 	finishAnimating();
 }
@@ -262,15 +263,9 @@ void LayerStackWidget::BackgroundWidget::paintEvent(QPaintEvent *e) {
 		if (topCorners || bottomCorners) {
 			p.setClipRegion(QRegion(rect()) - specialLayerBox.marginsRemoved(QMargins(st::boxRadius, 0, st::boxRadius, 0)) - specialLayerBox.marginsRemoved(QMargins(0, st::boxRadius, 0, st::boxRadius)));
 		}
-		Ui::Shadow::paint(p, specialLayerBox, width(), st::boxRoundShadow, sides);
-
+		Ui::Shadow::paint(p, specialLayerBox, width(), st::boxRoundShadow, Ui::SpecialLayerShadowCorners(), sides);
 		if (topCorners || bottomCorners) {
-			// In case of painting the shadow above the special layer we get
-			// glitches in the corners, so we need to paint the corners once more.
 			p.setClipping(false);
-			auto parts = (topCorners ? (RectPart::TopLeft | RectPart::TopRight) : RectPart::None)
-				| (bottomCorners ? (RectPart::BottomLeft | RectPart::BottomRight) : RectPart::None);
-			_roundRect.paint(p, specialLayerBox, parts);
 		}
 	}
 
@@ -318,6 +313,10 @@ void LayerStackWidget::BackgroundWidget::paintEvent(QPaintEvent *e) {
 		auto sourceRect = style::rtlrect(_mainMenuCache.width() - sourceWidth, 0, sourceWidth, _mainMenuCache.height(), _mainMenuCache.width());
 		p.drawPixmapLeft(0, 0, shownWidth, height(), width(), _mainMenuCache, sourceRect);
 	}
+	if (!_repaintIssued && !_a_shown.animating()) {
+		_repaintIssued = true;
+		update();
+	}
 }
 
 void LayerStackWidget::BackgroundWidget::finishAnimating() {
@@ -333,9 +332,10 @@ void LayerStackWidget::BackgroundWidget::animationCallback() {
 	checkIfDone();
 }
 
-LayerStackWidget::LayerStackWidget(QWidget *parent)
+LayerStackWidget::LayerStackWidget(QWidget *parent, ShowFactory showFactory)
 : RpWidget(parent)
-, _background(this) {
+, _background(this)
+, _showFactory(std::move(showFactory)) {
 	setGeometry(parentWidget()->rect());
 	hide();
 	_background->setDoneCallback([this] { animationDone(); });
@@ -372,6 +372,10 @@ void LayerWidget::resizeEvent(QResizeEvent *e) {
 	if (_resizedCallback) {
 		_resizedCallback();
 	}
+}
+
+bool LayerWidget::focusNextPrevChild(bool next) {
+	return base::FocusNextPrevChildBlocked(this, next);
 }
 
 void LayerStackWidget::setHideByBackgroundClick(bool hide) {
@@ -688,16 +692,20 @@ void LayerStackWidget::prepareForAnimation() {
 }
 
 void LayerStackWidget::animationDone() {
+	auto &integration = base::Integration::Instance();
 	bool hidden = true;
 	if (_mainMenu) {
+		integration.setCrashAnnotation("ShowingWidget", u"MainMenu"_q);
 		_mainMenu->show();
 		hidden = false;
 	}
 	if (_specialLayer) {
+		integration.setCrashAnnotation("ShowingWidget", u"SpecialLayer"_q);
 		_specialLayer->show();
 		hidden = false;
 	}
 	if (auto layer = currentLayer()) {
+		integration.setCrashAnnotation("ShowingWidget", u"Box"_q);
 		layer->show();
 		hidden = false;
 	}
@@ -705,7 +713,9 @@ void LayerStackWidget::animationDone() {
 	if (hidden) {
 		_hideFinishStream.fire({});
 	} else {
+		integration.setCrashAnnotation("ShowingWidget", u"Finished"_q);
 		showFinished();
+		integration.setCrashAnnotation("ShowingWidget", QString());
 	}
 }
 
@@ -719,6 +729,9 @@ void LayerStackWidget::showFinished() {
 	updateLayerBoxes();
 	if (_specialLayer) {
 		_specialLayer->showFinished();
+	}
+	if (_mainMenu) {
+		_mainMenu->showFinished();
 	}
 	if (auto layer = currentLayer()) {
 		layer->showFinished();

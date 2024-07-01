@@ -23,7 +23,8 @@ Instance::Instance(
 	not_null<QWidget*> widgetParent,
 	const Private &)
 : _st(config.st)
-, _hideAt(crl::now() + config.durationMs)
+, _hideAt(crl::now()
+	+ (config.duration ? config.duration : kDefaultDuration))
 , _sliding(config.slideSide != RectPart::None)
 , _widget(std::make_unique<internal::Widget>(widgetParent, config)) {
 	_shownAnimation.start(
@@ -85,6 +86,10 @@ void Instance::hideAnimated() {
 void Instance::hide() {
 	_widget->hide();
 	_widget->deleteLater();
+}
+
+void Instance::setInputUsed(bool used) {
+	_widget->setInputUsed(used);
 }
 
 not_null<RpWidget*> Instance::widget() const {

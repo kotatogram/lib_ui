@@ -10,7 +10,9 @@
 #include "ui/rect_part.h"
 #include "ui/integration.h"
 
+#include <crl/crl.h>
 #include <QtCore/QEvent>
+#include <QtWidgets/QWidget>
 
 class QPixmap;
 class QImage;
@@ -138,6 +140,7 @@ void RenderWidget(
 	= QWidget::DrawChildren | QWidget::IgnoreMask);
 
 void ForceFullRepaint(not_null<QWidget*> widget);
+void ForceFullRepaintSync(not_null<QWidget*> widget);
 
 void PostponeCall(FnMut<void()> &&callable);
 
@@ -192,8 +195,20 @@ QPointer<const Widget> MakeWeak(not_null<const Widget*> object) {
     not_null<QWidget*> widget,
     const QRect &rect = QRect());
 
-void DisableCustomScaling();
-
 int WheelDirection(not_null<QWheelEvent*> e);
+
+[[nodiscard]] QPoint MapFrom(
+	not_null<QWidget*> to,
+	not_null<QWidget*> from,
+	QPoint point);
+
+[[nodiscard]] QRect MapFrom(
+	not_null<QWidget*> to,
+	not_null<QWidget*> from,
+	QRect rect);
+
+void SetGeomtryWithPossibleScreenChange(
+	not_null<QWidget*> widget,
+	QRect geometry);
 
 } // namespace Ui

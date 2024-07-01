@@ -7,6 +7,9 @@
 #include "ui/toast/toast_widget.h"
 
 #include "ui/image/image_prepare.h"
+#include "ui/text/text_utilities.h"
+#include "ui/widgets/tooltip.h"
+#include "ui/painter.h"
 #include "styles/palette.h"
 #include "styles/style_widgets.h"
 
@@ -15,6 +18,21 @@
 namespace Ui {
 namespace Toast {
 namespace internal {
+namespace {
+
+[[nodiscard]] TextWithEntities ComputeText(const Config &config) {
+	auto result = config.text;
+	if (!config.title.isEmpty()) {
+		result = Text::Bold(
+			config.title
+		).append('\n').append(std::move(result));
+	}
+	return config.multiline
+		? result
+		: TextUtilities::SingleLine(std::move(result));
+}
+
+} // namespace
 
 Widget::Widget(QWidget *parent, const Config &config)
 : RpWidget(parent)
@@ -23,10 +41,11 @@ Widget::Widget(QWidget *parent, const Config &config)
 , _slideSide(config.slideSide)
 , _multiline(config.multiline)
 , _dark(config.dark)
+, _adaptive(config.adaptive)
 , _maxTextWidth(widthWithoutPadding(_st->maxWidth))
 , _maxTextHeight(
-	config.st->style.font->height * (_multiline ? config.maxLines : 1))
-, _text(_multiline ? widthWithoutPadding(config.st->minWidth) : QFIXED_MAX)
+	_st->style.font->height * (_multiline ? config.maxLines : 1))
+, _text(_multiline ? widthWithoutPadding(config.st->minWidth) : kQFixedMax)
 , _clickHandlerFilter(config.filter) {
 	const auto toastOptions = TextParseOptions{
 		TextParseMultiline,
@@ -36,10 +55,18 @@ Widget::Widget(QWidget *parent, const Config &config)
 	};
 	_text.setMarkedText(
 		_st->style,
-		_multiline ? config.text : TextUtilities::SingleLine(config.text),
-		toastOptions);
+		ComputeText(config),
+		toastOptions,
+		config.textContext ? config.textContext(this) : std::any());
+	if (_text.hasSpoilers()) {
+		const auto weak = Ui::MakeWeak(this);
+		_text.setSpoilerLinkFilter([=](const ClickContext &context) {
+			return (weak != nullptr);
+		});
+	}
 
-	if (_text.hasLinks()) {
+	_processMouse = _text.hasLinks() || _text.hasSpoilers();
+	if (_processMouse) {
 		setMouseTracking(true);
 	} else {
 		setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -47,6 +74,10 @@ Widget::Widget(QWidget *parent, const Config &config)
 
 	onParentResized();
 	show();
+}
+
+void Widget::setInputUsed(bool used) {
+	setAttribute(Qt::WA_TransparentForMouseEvents, !used && !_processMouse);
 }
 
 void Widget::onParentResized() {
@@ -61,6 +92,12 @@ void Widget::updateGeometry() {
 	accumulate_min(
 		width,
 		parentWidget()->width() - _st->margin.left() - _st->margin.right());
+	if (_adaptive) {
+		const auto added = _st->padding.left() + _st->padding.right();
+		width = FindNiceTooltipWidth(0, width - added, [&](int width) {
+			return _text.countHeight(width);
+		}) + added;
+	}
 	_textWidth = widthWithoutPadding(width);
 	_textHeight = _multiline
 		? qMin(_text.countHeight(_textWidth), _maxTextHeight)
@@ -125,7 +162,7 @@ void Widget::paintEvent(QPaintEvent *e) {
 	}
 	_roundRect.paint(p, rect());
 	if (_dark) {
-		_roundRect.paint(p, rect());
+		//_roundRect.paint(p, rect());
 	}
 
 	if (!_st->icon.empty()) {
@@ -136,20 +173,18 @@ void Widget::paintEvent(QPaintEvent *e) {
 			width());
 	}
 
-	p.setTextPalette(_st->palette);
-
-	const auto lines = _maxTextHeight / _st->style.font->height;
 	p.setPen(st::toastFg);
-	_text.drawElided(
-		p,
-		_st->padding.left(),
-		_textTop,
-		_textWidth + 1,
-		lines);
+	_text.draw(p, {
+		.position = { _st->padding.left(), _textTop },
+		.availableWidth = _textWidth + 1,
+		.palette = &_st->palette,
+		.spoiler = Ui::Text::DefaultSpoilerCache(),
+		.elisionHeight = _maxTextHeight,
+	});
 }
 
 void Widget::leaveEventHook(QEvent *e) {
-	if (!_text.hasLinks()) {
+	if (!_processMouse) {
 		return;
 	}
 	if (ClickHandler::getActive()) {
@@ -160,12 +195,14 @@ void Widget::leaveEventHook(QEvent *e) {
 }
 
 void Widget::mouseMoveEvent(QMouseEvent *e) {
-	if (!_text.hasLinks()) {
+	if (!_processMouse) {
 		return;
 	}
 	const auto point = e->pos()
 		- QPoint(_st->padding.left(), _textTop);
-	const auto state = _text.getStateElided(point, _textWidth + 1);
+	auto request = Ui::Text::StateRequestElided();
+	request.lines = (_maxTextHeight / _st->style.font->height);
+	const auto state = _text.getStateElided(point, _textWidth + 1, request);
 	const auto was = ClickHandler::getActive();
 	if (was != state.link) {
 		ClickHandler::setActive(state.link);
@@ -177,14 +214,14 @@ void Widget::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void Widget::mousePressEvent(QMouseEvent *e) {
-	if (!_text.hasLinks() || e->button() != Qt::LeftButton) {
+	if (!_processMouse || e->button() != Qt::LeftButton) {
 		return;
 	}
 	ClickHandler::pressed();
 }
 
 void Widget::mouseReleaseEvent(QMouseEvent *e) {
-	if (!_text.hasLinks() || e->button() != Qt::LeftButton) {
+	if (!_processMouse || e->button() != Qt::LeftButton) {
 		return;
 	}
 	if (const auto handler = ClickHandler::unpressed()) {

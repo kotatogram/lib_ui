@@ -126,6 +126,12 @@ RpWidget *VerticalLayout::insertChild(
 		_rows.insert(
 			begin(_rows) + atPosition,
 			{ std::move(child), margin });
+		auto availRowWidth = widthNoMargins()
+			- margin.left()
+			- margin.right();
+		if (availRowWidth > 0) {
+			weak->resizeToNaturalWidth(availRowWidth);
+		}
 		weak->heightValue(
 		) | rpl::start_with_next_done([=] {
 			if (!_inResize) {
@@ -133,7 +139,7 @@ RpWidget *VerticalLayout::insertChild(
 			}
 		}, [=] {
 			removeChild(weak);
-		}, lifetime());
+		}, _rowsLifetime);
 		return weak;
 	}
 	return nullptr;
@@ -196,6 +202,12 @@ void VerticalLayout::removeChild(RpWidget *child) {
 	_rows.erase(it);
 
 	resize(width(), margins.top() + top + margins.bottom());
+}
+
+void VerticalLayout::clear() {
+	while (!_rows.empty()) {
+		removeChild(_rows.front().widget.data());
+	}
 }
 
 } // namespace Ui

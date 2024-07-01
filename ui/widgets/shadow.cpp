@@ -14,22 +14,60 @@
 #include <QtGui/QtEvents>
 
 namespace Ui {
+namespace {
 
-PlainShadow::PlainShadow(QWidget *parent)
-: PlainShadow(parent, st::shadowFg) {
-}
+struct CustomImage {
+public:
+	explicit CustomImage(const QImage &image)
+	: _image(image) {
+	}
+	void paint(QPainter &p, int x, int y, int outerw) const {
+		p.drawImage(x, y, _image);
+	}
+	void fill(QPainter &p, QRect rect) const {
+		p.drawImage(rect, _image);
+	}
+	[[nodiscard]] bool empty() const {
+		return _image.isNull();
+	}
+	[[nodiscard]] int width() const {
+		return _image.width() / style::DevicePixelRatio();
+	}
+	[[nodiscard]] int height() const {
+		return _image.height() / style::DevicePixelRatio();
+	}
 
-PlainShadow::PlainShadow(QWidget *parent, style::color color)
-: RpWidget(parent)
-, _color(color) {
-	resize(st::lineWidth, st::lineWidth);
-}
+private:
+	const QImage &_image;
 
-void PlainShadow::paintEvent(QPaintEvent *e) {
-	QPainter(this).fillRect(e->rect(), _color);
-}
+};
 
-void Shadow::paint(QPainter &p, const QRect &box, int outerWidth, const style::Shadow &st, RectParts sides) {
+struct CustomShadowCorners {
+	const style::icon &left;
+	CustomImage topLeft;
+	const style::icon &top;
+	CustomImage topRight;
+	const style::icon &right;
+	CustomImage bottomRight;
+	const style::icon &bottom;
+	CustomImage bottomLeft;
+	const style::margins &extend;
+};
+
+struct CustomShadow {
+	CustomImage left;
+	CustomImage topLeft;
+	CustomImage top;
+	CustomImage topRight;
+	CustomImage right;
+	CustomImage bottomRight;
+	CustomImage bottom;
+	CustomImage bottomLeft;
+	const style::margins &extend;
+};
+
+template <typename Shadow>
+void ShadowPaint(QPainter &p, const QRect &box, int outerWidth, const Shadow &st, RectParts sides) {
 	auto left = (sides & RectPart::Left);
 	auto top = (sides & RectPart::Top);
 	auto right = (sides & RectPart::Right);
@@ -82,6 +120,72 @@ void Shadow::paint(QPainter &p, const QRect &box, int outerWidth, const style::S
 			st.bottom.fill(p, style::rtlrect(from, box.y() + box.height() + st.extend.bottom() - st.bottom.height(), to - from, st.bottom.height(), outerWidth));
 		}
 	}
+}
+
+} // namespace
+
+PlainShadow::PlainShadow(QWidget *parent)
+: PlainShadow(parent, st::shadowFg) {
+}
+
+PlainShadow::PlainShadow(QWidget *parent, style::color color)
+: RpWidget(parent)
+, _color(color) {
+	resize(st::lineWidth, st::lineWidth);
+}
+
+void PlainShadow::paintEvent(QPaintEvent *e) {
+	QPainter(this).fillRect(e->rect(), _color);
+}
+
+void Shadow::paint(QPainter &p, const QRect &box, int outerWidth, const style::Shadow &st, RectParts sides) {
+	ShadowPaint<style::Shadow>(p, box, outerWidth, st, sides);
+}
+
+void Shadow::paint(
+		QPainter &p,
+		const QRect &box,
+		int outerWidth,
+		const style::Shadow &st,
+		const std::array<QImage, 4> &corners,
+		RectParts sides) {
+	const auto shadow = CustomShadowCorners{
+		.left = st.left,
+		.topLeft = CustomImage(corners[0]),
+		.top = st.top,
+		.topRight = CustomImage(corners[2]),
+		.right = st.right,
+		.bottomRight = CustomImage(corners[3]),
+		.bottom = st.bottom,
+		.bottomLeft = CustomImage(corners[1]),
+		.extend = st.extend,
+	};
+	ShadowPaint<CustomShadowCorners>(p, box, outerWidth, shadow, sides);
+}
+
+void Shadow::paint(
+		QPainter &p,
+		const QRect &box,
+		int outerWidth,
+		const style::Shadow &st,
+		const std::array<QImage, 4> &sides,
+		const std::array<QImage, 4> &corners) {
+	const auto shadow = CustomShadow{
+		.left = CustomImage(sides[0]),
+		.topLeft = CustomImage(corners[0]),
+		.top = CustomImage(sides[1]),
+		.topRight = CustomImage(corners[2]),
+		.right = CustomImage(sides[2]),
+		.bottomRight = CustomImage(corners[3]),
+		.bottom = CustomImage(sides[3]),
+		.bottomLeft = CustomImage(corners[1]),
+		.extend = st.extend,
+	};
+	ShadowPaint<CustomShadow>(p, box, outerWidth, shadow, RectPart()
+		| (sides[0].isNull() ? RectPart() : RectPart::Left)
+		| (sides[1].isNull() ? RectPart() : RectPart::Top)
+		| (sides[2].isNull() ? RectPart() : RectPart::Right)
+		| (sides[3].isNull() ? RectPart() : RectPart::Bottom));
 }
 
 QPixmap Shadow::grab(

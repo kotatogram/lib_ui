@@ -13,14 +13,13 @@
 namespace Ui {
 
 class DropdownMenu : public InnerDropdown {
-	Q_OBJECT
-
 public:
 	DropdownMenu(QWidget *parent, const style::DropdownMenu &st = st::defaultDropdownMenu);
 
 	not_null<QAction*> addAction(base::unique_qptr<Menu::ItemBase> widget);
 	not_null<QAction*> addAction(const QString &text, Fn<void()> callback, const style::icon *icon = nullptr, const style::icon *iconOver = nullptr);
-	not_null<QAction*> addSeparator();
+	not_null<QAction*> addSeparator(
+		const style::MenuSeparator *st = nullptr);
 	void clearActions();
 
 	void setHiddenCallback(Fn<void()> callback) {
@@ -42,11 +41,6 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
-
-private Q_SLOTS:
-	void onHidden() {
-		hideFinish();
-	}
 
 private:
 	// Not ready with submenus yet.

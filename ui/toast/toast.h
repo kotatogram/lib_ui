@@ -17,6 +17,10 @@ namespace style {
 struct Toast;
 } // namespace style
 
+namespace st {
+extern const style::Toast &defaultMultilineToast;
+} // namespace st
+
 namespace Ui {
 namespace Toast {
 
@@ -29,14 +33,17 @@ using ClickHandlerFilter = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
 
 inline constexpr auto kDefaultDuration = crl::time(1500);
 struct Config {
+	QString title;
 	TextWithEntities text;
-	not_null<const style::Toast*> st;
-	crl::time durationMs = kDefaultDuration;
+	not_null<const style::Toast*> st = &st::defaultMultilineToast;
+	crl::time duration = kDefaultDuration;
 	int maxLines = 16;
-	bool multiline = false;
+	bool adaptive = false;
+	bool multiline = true;
 	bool dark = false;
 	RectPart slideSide = RectPart::None;
 	ClickHandlerFilter filter;
+	Fn<std::any(not_null<QWidget*>)> textContext;
 };
 
 void SetDefaultParent(not_null<QWidget*> parent);
@@ -56,6 +63,7 @@ public:
 	void hideAnimated();
 	void hide();
 
+	void setInputUsed(bool used);
 	[[nodiscard]] not_null<RpWidget*> widget() const;
 
 private:

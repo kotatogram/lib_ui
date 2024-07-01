@@ -50,7 +50,10 @@ void VerticalLayoutReorder::start() {
 	}
 	for (auto i = 0; i != count; ++i) {
 		const auto widget = _layout->widgetAt(i);
-		widget->events(
+		const auto eventsProducer = _proxyWidgetCallback
+			? _proxyWidgetCallback(i)
+			: widget;
+		eventsProducer->events(
 		) | rpl::start_with_next_done([=](not_null<QEvent*> e) {
 			switch (e->type()) {
 			case QEvent::MouseMove:
@@ -73,6 +76,28 @@ void VerticalLayoutReorder::start() {
 		}, _lifetime);
 		_entries.push_back({ widget });
 	}
+}
+
+void VerticalLayoutReorder::addPinnedInterval(int from, int length) {
+	_pinnedIntervals.push_back({ from, length });
+}
+
+void VerticalLayoutReorder::clearPinnedIntervals() {
+	_pinnedIntervals.clear();
+}
+
+void VerticalLayoutReorder::setMouseEventProxy(ProxyCallback callback) {
+	_proxyWidgetCallback = std::move(callback);
+}
+
+bool VerticalLayoutReorder::Interval::isIn(int index) const {
+	return (index >= from) && (index < (from + length));
+}
+
+bool VerticalLayoutReorder::isIndexPinned(int index) const {
+	return ranges::any_of(_pinnedIntervals, [&](const Interval &i) {
+		return i.isIn(index);
+	});
 }
 
 void VerticalLayoutReorder::mouseMove(
@@ -105,6 +130,9 @@ void VerticalLayoutReorder::checkForStart(QPoint position) {
 }
 
 void VerticalLayoutReorder::updateOrder(int index, QPoint position) {
+	if (isIndexPinned(index)) {
+		return;
+	}
 	const auto shift = position.y() - _currentStart;
 	auto &current = _entries[index];
 	current.shiftAnimation.stop();
@@ -120,6 +148,9 @@ void VerticalLayoutReorder::updateOrder(int index, QPoint position) {
 	if (shift > 0) {
 		auto top = current.widget->y() - shift;
 		for (auto next = index + 1; next != count; ++next) {
+			if (isIndexPinned(next)) {
+				return;
+			}
 			const auto &entry = _entries[next];
 			top += entry.widget->height();
 			if (currentMiddle < top) {
@@ -137,6 +168,9 @@ void VerticalLayoutReorder::updateOrder(int index, QPoint position) {
 			moveToShift(next, 0);
 		}
 		for (auto prev = index - 1; prev >= 0; --prev) {
+			if (isIndexPinned(prev)) {
+				return;
+			}
 			const auto &entry = _entries[prev];
 			if (currentMiddle >= entry.widget->y() - entry.shift + currentHeight) {
 				moveToShift(prev, 0);

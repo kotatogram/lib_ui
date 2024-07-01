@@ -54,6 +54,8 @@ public:
 	void setVerticalShift(int index, int shift);
 	void reorderRows(int oldIndex, int newIndex);
 
+	void clear();
+
 protected:
 	int resizeGetHeight(int newWidth) override;
 	void visibleTopBottomUpdated(
@@ -81,6 +83,8 @@ private:
 	};
 	std::vector<Row> _rows;
 	bool _inResize = false;
+
+	rpl::lifetime _rowsLifetime;
 
 };
 

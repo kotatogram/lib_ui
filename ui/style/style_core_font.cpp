@@ -18,6 +18,10 @@
 #include <QtGui/QFontDatabase>
 #include <QtWidgets/QApplication>
 
+#if __has_include(<glib.h>)
+#include <glib.h>
+#endif
+
 void style_InitFontsResource() {
 #ifdef Q_OS_MAC // Use resources from the .app bundle on macOS.
 
@@ -25,9 +29,9 @@ void style_InitFontsResource() {
 
 #else // Q_OS_MAC
 
-#ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 	Q_INIT_RESOURCE(fonts);
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+#endif // !LIB_UI_USE_PACKAGED_FONTS
 #ifdef Q_OS_WIN
 	Q_INIT_RESOURCE(win);
 #endif // Q_OS_WIN
@@ -67,6 +71,7 @@ bool ValidateFont(const QString &familyName, int flags = 0) {
 	return true;
 }
 
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 bool LoadCustomFont(const QString &filePath, const QString &familyName, int flags = 0) {
 	auto regularId = QFontDatabase::addApplicationFont(filePath);
 	if (regularId < 0) {
@@ -90,6 +95,7 @@ bool LoadCustomFont(const QString &filePath, const QString &familyName, int flag
 
 	return ValidateFont(familyName, flags);
 }
+#endif // !LIB_UI_USE_PACKAGED_FONTS
 
 [[nodiscard]] QString SystemMonospaceFont() {
 	const auto type = QFontDatabase::FixedFont;
@@ -103,6 +109,7 @@ bool TryFont(const QString &attempt) {
 
 [[nodiscard]] QString ManualMonospaceFont() {
 	const auto kTryFirst = std::initializer_list<QString>{
+		"Cascadia Mono",
 		"Consolas",
 		"Liberation Mono",
 		"Menlo",
@@ -136,7 +143,7 @@ enum {
 
 	FontTypesCount,
 };
-#ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 QString FontTypeFiles[FontTypesCount] = {
 	"DAOpenSansRegular",
 	"DAOpenSansRegularItalic",
@@ -169,7 +176,6 @@ QString FontTypePersianFallback[FontTypesCount] = {
 	"DAVazirMedium",
 	"DAVazirMedium",
 };
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 int32 FontTypeFlags[FontTypesCount] = {
 	0,
 	FontItalic,
@@ -178,6 +184,7 @@ int32 FontTypeFlags[FontTypesCount] = {
 	FontSemibold,
 	FontSemibold | FontItalic,
 };
+#endif // !LIB_UI_USE_PACKAGED_FONTS
 
 bool Started = false;
 QString Overrides[FontTypesCount];
@@ -194,7 +201,7 @@ void StartFonts() {
 
 	const auto fontSettings = Ui::Integration::Instance().fontSettings();
 
-#ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 	if (!fontSettings.useSystemFont) {
 		[[maybe_unused]] bool areGood[FontTypesCount] = { false };
 		for (auto i = 0; i != FontTypesCount; ++i) {
@@ -204,9 +211,9 @@ void StartFonts() {
 			areGood[i] = LoadCustomFont(":/gui/fonts/" + file + ".ttf", name, flags);
 			Overrides[i] = name;
 
-		const auto persianFallbackFile = FontTypePersianFallbackFiles[i];
-		const auto persianFallback = FontTypePersianFallback[i];
-		LoadCustomFont(":/gui/fonts/" + persianFallbackFile + ".ttf", persianFallback, flags);
+			const auto persianFallbackFile = FontTypePersianFallbackFiles[i];
+			const auto persianFallback = FontTypePersianFallback[i];
+			LoadCustomFont(":/gui/fonts/" + persianFallbackFile + ".ttf", persianFallback, flags);
 
 #ifdef Q_OS_WIN
 			// Attempt to workaround a strange font bug with Open Sans Semibold not loading.
@@ -226,8 +233,8 @@ void StartFonts() {
 			//QFont::insertSubstitution(name, fallback);
 #endif // Q_OS_WIN
 
-		QFont::insertSubstitution(name, persianFallback);
-	}
+			QFont::insertSubstitution(name, persianFallback);
+		}
 
 #ifdef Q_OS_MAC
 		auto list = QStringList();
@@ -240,7 +247,11 @@ void StartFonts() {
 		}
 #endif // Q_OS_MAC
 	}
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+#elif __has_include(<glib.h>) // !LIB_UI_USE_PACKAGED_FONTS
+	g_warning(
+		"Unable to load patched fonts with Qt workarounds, "
+		"expect font issues.");
+#endif // LIB_UI_USE_PACKAGED_FONTS
 
 	if (!fontSettings.mainFont.isEmpty() && ValidateFont(fontSettings.mainFont)) {
 		Overrides[FontTypeRegular] = fontSettings.mainFont;
@@ -299,15 +310,15 @@ QString MonospaceFont() {
 		const auto manual = ManualMonospaceFont();
 		const auto system = SystemMonospaceFont();
 
-#if defined Q_OS_WIN || defined Q_OS_MAC
+#ifdef Q_OS_WIN
 		// Prefer our monospace font.
 		const auto useSystem = manual.isEmpty();
-#else // Q_OS_WIN || Q_OS_MAC
+#else // Q_OS_WIN
 		// Prefer system monospace font.
 		const auto metrics = QFontMetrics(QFont(system));
 		const auto useSystem = manual.isEmpty()
 			|| (metrics.horizontalAdvance(QChar('i')) == metrics.horizontalAdvance(QChar('W')));
-#endif // Q_OS_WIN || Q_OS_MAC
+#endif // Q_OS_WIN
 		return (useSystem || fontSettings.useSystemFont) ? system : manual;
 	}();
 
@@ -332,27 +343,27 @@ int registerFontFamily(const QString &family) {
 }
 
 FontData::FontData(int size, uint32 flags, int family, Font *other)
-: f(ResolveFont(flags, size))
-, m(f)
+: f(ResolveFont(family ? fontFamilies[family] : QString(), flags, size))
+, _m(f)
 , _size(size)
 , _flags(flags)
 , _family(family) {
 	if (other) {
-		memcpy(modified, other, sizeof(modified));
+		memcpy(_modified, other, sizeof(_modified));
 	}
-	modified[_flags] = Font(this);
+	_modified[_flags] = Font(this);
 
 	const auto fontSettings = Ui::Integration::Instance().fontSettings();
 	if (fontSettings.useOriginalMetrics && !(_flags & FontMonospace)) {
 		const auto mOrig = GetFontMetrics(size);
 
-		height = mOrig.height();
-		ascent = mOrig.ascent();
-		descent = mOrig.descent();
+		height = int(base::SafeRound(mOrig.height()));
+		ascent = int(base::SafeRound(mOrig.ascent()));
+		descent = int(base::SafeRound(mOrig.descent()));
 	} else {
-		height = m.height();
-		ascent = m.ascent();
-		descent = m.descent();
+		height = int(base::SafeRound(_m.height()));
+		ascent = int(base::SafeRound(_m.ascent()));
+		descent = int(base::SafeRound(_m.descent()));
 	}
 
 	spacew = width(QLatin1Char(' '));
@@ -397,10 +408,10 @@ int FontData::family() const {
 
 Font FontData::otherFlagsFont(uint32 flag, bool set) const {
 	int32 newFlags = set ? (_flags | flag) : (_flags & ~flag);
-	if (!modified[newFlags].v()) {
-		modified[newFlags] = Font(_size, newFlags, _family, modified);
+	if (!_modified[newFlags].v()) {
+		_modified[newFlags] = Font(_size, newFlags, _family, _modified);
 	}
-	return modified[newFlags];
+	return _modified[newFlags];
 }
 
 Font::Font(int size, uint32 flags, const QString &family) {

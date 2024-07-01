@@ -6,16 +6,26 @@
 //
 #pragma once
 
-#include "styles/style_widgets.h"
-
 #include <deque>
+
+namespace Images {
+struct CornersMaskRef;
+} // namespace Images
+
+namespace style {
+struct RippleAnimation;
+} // namespace style
 
 namespace Ui {
 
 class RippleAnimation {
 public:
-	// White upon transparent mask, like colorizeImage(black-white-mask, white).
-	RippleAnimation(const style::RippleAnimation &st, QImage mask, Fn<void()> update);
+	// White upon transparent mask,
+	// like colorizeImage(black-white-mask, white).
+	RippleAnimation(
+		const style::RippleAnimation &st,
+		QImage mask,
+		Fn<void()> update);
 
 	void add(QPoint origin, int startRadius = 0);
 	void addFading();
@@ -24,16 +34,25 @@ public:
 	void lastFinish();
 	void forceRepaint();
 
-	void paint(QPainter &p, int x, int y, int outerWidth, const QColor *colorOverride = nullptr);
+	void paint(
+		QPainter &p,
+		int x,
+		int y,
+		int outerWidth,
+		const QColor *colorOverride = nullptr);
 
 	bool empty() const {
 		return _ripples.empty();
 	}
 
-	static QImage maskByDrawer(QSize size, bool filled, Fn<void(QPainter &p)> drawer);
-	static QImage rectMask(QSize size);
-	static QImage roundRectMask(QSize size, int radius);
-	static QImage ellipseMask(QSize size);
+	static QImage MaskByDrawer(
+		QSize size,
+		bool filled,
+		Fn<void(QPainter &p)> drawer);
+	static QImage RectMask(QSize size);
+	static QImage RoundRectMask(QSize size, int radius);
+	static QImage RoundRectMask(QSize size, Images::CornersMaskRef corners);
+	static QImage EllipseMask(QSize size);
 
 	~RippleAnimation();
 

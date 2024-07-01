@@ -24,7 +24,10 @@ struct Capabilities {
 	bool transparency = false;
 };
 
-[[nodiscard]] Capabilities CheckCapabilities(QWidget *widget = nullptr);
+[[nodiscard]] Capabilities CheckCapabilities(
+	QWidget *widget = nullptr,
+	bool avoidWidgetCreation = false);
+[[nodiscard]] Backend ChooseBackendDefault(Capabilities capabilities);
 
 void ForceDisable(bool disable);
 
@@ -37,7 +40,7 @@ enum class ANGLE {
 	D3D9,
 	D3D11,
 	D3D11on12,
-	OpenGL,
+	//OpenGL,
 };
 
 void ConfigureANGLE(); // Requires Ui::Integration being set.

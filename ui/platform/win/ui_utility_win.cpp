@@ -6,33 +6,26 @@
 //
 #include "ui/platform/win/ui_utility_win.h"
 
-#include "base/platform/win/base_windows_h.h"
+#include "ui/widgets/popup_menu.h"
 
 #include <QtWidgets/QApplication>
 #include <QtGui/QWindow>
+#include <QtCore/QAbstractNativeEventFilter>
 
+#include <windows.h>
 #include <wrl/client.h>
 #include <Shobjidl.h>
 
+#include "base/event_filter.h"
+#include <QTimer>
+#include <QScreen>
+
 using namespace Microsoft::WRL;
 
-namespace Ui {
-namespace Platform {
+namespace Ui::Platform {
 
 bool IsApplicationActive() {
 	return QApplication::activeWindow() != nullptr;
-}
-
-void UpdateOverlayed(not_null<QWidget*> widget) {
-	const auto wm = widget->testAttribute(Qt::WA_Mapped);
-	const auto wv = widget->testAttribute(Qt::WA_WState_Visible);
-	if (!wm) widget->setAttribute(Qt::WA_Mapped, true);
-	if (!wv) widget->setAttribute(Qt::WA_WState_Visible, true);
-	widget->update();
-	QEvent e(QEvent::UpdateRequest);
-	QGuiApplication::sendEvent(widget, &e);
-	if (!wm) widget->setAttribute(Qt::WA_Mapped, false);
-	if (!wv) widget->setAttribute(Qt::WA_WState_Visible, false);
 }
 
 void IgnoreAllActivation(not_null<QWidget*> widget) {
@@ -53,7 +46,7 @@ void IgnoreAllActivation(not_null<QWidget*> widget) {
 std::optional<bool> IsOverlapped(
 		not_null<QWidget*> widget,
 		const QRect &rect) {
-	const auto handle = reinterpret_cast<HWND>(widget->window()->winId());
+	const auto handle = HWND(widget->winId());
 	Expects(handle != nullptr);
 
 	ComPtr<IVirtualDesktopManager> virtualDesktopManager;
@@ -62,7 +55,7 @@ std::optional<bool> IsOverlapped(
 		nullptr,
 		CLSCTX_ALL,
 		IID_PPV_ARGS(&virtualDesktopManager));
-	
+
 	if (SUCCEEDED(hr)) {
 		BOOL isCurrent;
 		hr = virtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
@@ -73,14 +66,36 @@ std::optional<bool> IsOverlapped(
 		}
 	}
 
-	std::vector<HWND> visited;
-	const RECT nativeRect{
-		rect.left(),
-		rect.top(),
-		rect.right(),
-		rect.bottom(),
-	};
+	const auto nativeRect = [&] {
+		const auto topLeft = [&] {
+			const auto qpoints = rect.topLeft()
+				* widget->windowHandle()->devicePixelRatio();
+			POINT result{
+				qpoints.x(),
+				qpoints.y(),
+			};
+			ClientToScreen(handle, &result);
+			return result;
+		}();
+		const auto bottomRight = [&] {
+			const auto qpoints = rect.bottomRight()
+				* widget->windowHandle()->devicePixelRatio();
+			POINT result{
+				qpoints.x(),
+				qpoints.y(),
+			};
+			ClientToScreen(handle, &result);
+			return result;
+		}();
+		return RECT{
+			topLeft.x,
+			topLeft.y,
+			bottomRight.x,
+			bottomRight.y,
+		};
+	}();
 
+	std::vector<HWND> visited;
 	for (auto curHandle = handle;
 		curHandle != nullptr && !ranges::contains(visited, curHandle);
 		curHandle = GetWindow(curHandle, GW_HWNDPREV)) {
@@ -99,27 +114,87 @@ std::optional<bool> IsOverlapped(
 	return false;
 }
 
-bool ShowWindowMenu(QWindow *window) {
-	const auto pos = QCursor::pos();
-
+void ShowWindowMenu(not_null<QWidget*> widget, const QPoint &point) {
+	const auto handle = HWND(widget->winId());
+	const auto mapped = point * widget->windowHandle()->devicePixelRatio();
+	POINT p{ mapped.x(), mapped.y() };
+	ClientToScreen(handle, &p);
 	SendMessage(
-		HWND(window->winId()),
-		WM_SYSCOMMAND,
-		SC_MOUSEMENU,
-		MAKELPARAM(pos.x(), pos.y()));
-
-	return true;
+		handle,
+		0x313 /* WM_POPUPSYSTEMMENU */,
+		0,
+		MAKELPARAM(p.x, p.y));
 }
 
-TitleControls::Layout TitleControlsLayout() {
-	return TitleControls::Layout{
-		.right = {
-			TitleControls::Control::Minimize,
-			TitleControls::Control::Maximize,
-			TitleControls::Control::Close,
+void FixPopupMenuNativeEmojiPopup(not_null<PopupMenu*> menu) {
+	// Windows native emoji selector, that can be called by Win+. shortcut,
+	// is behaving strangely within an input field in a popup menu.
+	//
+	// When the selector is shown and a mouse button is pressed the system
+	// sends two events "MousePress + MouseRelease" to the popup menu, even
+	// before the button is physically released. That way we hide the menu
+	// on this MousePress, that we shouldn't have received (in case of
+	// input field in the main window no such events are sent at all).
+	//
+	// To workaround this we detect a WM_MOUSELEAVE event that is sent to
+	// the popup menu when the selector is shown and skip all mouse press
+	// events while we don't receive mouse move events. If we receive mouse
+	// move events that means the selector was hidden and the mouse is
+	// captured by the popup menu again.
+	class Filter final : public QAbstractNativeEventFilter {
+	public:
+		explicit Filter(not_null<PopupMenu*> menu) : _menu(menu) {
 		}
+
+		bool nativeEventFilter(
+				const QByteArray &eventType,
+				void *message,
+				long *result) override {
+			const auto msg = static_cast<MSG*>(message);
+			switch (msg->message) {
+			case WM_MOUSELEAVE: if (msg->hwnd == hwnd()) {
+				_skipMouseDown = true;
+			} break;
+			case WM_MOUSEMOVE: if (msg->hwnd == hwnd()) {
+				_skipMouseDown = false;
+			} break;
+			case WM_LBUTTONDOWN:
+			case WM_LBUTTONDBLCLK: if (msg->hwnd == hwnd()) {
+				return _skipMouseDown;
+			}
+			}
+			return false;
+		}
+
+	private:
+		[[nodiscard]] HWND hwnd() const {
+			const auto top = _menu->window()->windowHandle();
+			return top ? reinterpret_cast<HWND>(top->winId()) : nullptr;
+		}
+
+		not_null<PopupMenu*> _menu;
+		bool _skipMouseDown = false;
+
 	};
+
+	QGuiApplication::instance()->installNativeEventFilter(
+		menu->lifetime().make_state<Filter>(menu));
 }
 
-} // namespace Platform
-} // namespace Ui
+void SetGeometryWithPossibleScreenChange(
+		not_null<QWidget*> widget,
+		QRect geometry) {
+	if (const auto screen = QGuiApplication::screenAt(geometry.center())) {
+		const auto window = widget->window();
+		window->createWinId();
+		const auto handle = window->windowHandle();
+		if (handle->screen() != screen) {
+			handle->setScreen(screen);
+			window->move(screen->availableGeometry().topLeft());
+			window->show();
+		}
+	}
+	widget->setGeometry(geometry);
+}
+
+} // namespace Ui::Platform

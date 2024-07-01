@@ -6,19 +6,30 @@
 //
 #pragma once
 
+#include "base/timer.h"
 #include "ui/emoji_config.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/text/text_entity.h"
-#include "styles/style_widgets.h"
+#include "ui/text/text_custom_emoji.h"
 
-#include <QContextMenuEvent>
-#include <QtWidgets/QLineEdit>
-#include <QtWidgets/QTextEdit>
-#include <QtCore/QTimer>
+#include <QtGui/QTextObjectInterface>
 
+#include <rpl/variable.h>
+
+class QMenu;
+class QTextEdit;
 class QTouchEvent;
+class QContextMenuEvent;
 class Painter;
+
+namespace Ui::Text {
+class CustomEmoji;
+} // namespace Ui::Text
+
+namespace style {
+struct InputField;
+} // namespace style
 
 namespace Ui {
 
@@ -26,13 +37,20 @@ void AddCustomReplacement(QString from, QString to);
 
 const auto kClearFormatSequence = QKeySequence("ctrl+shift+n");
 const auto kStrikeOutSequence = QKeySequence("ctrl+shift+x");
+const auto kBlockquoteSequence = QKeySequence("ctrl+shift+.");
 const auto kMonospaceSequence = QKeySequence("ctrl+shift+m");
 const auto kEditLinkSequence = QKeySequence("ctrl+k");
 const auto kSpoilerSequence = QKeySequence("ctrl+shift+p");
 
 class PopupMenu;
+class InputField;
 
 void InsertEmojiAtCursor(QTextCursor cursor, EmojiPtr emoji);
+void InsertCustomEmojiAtCursor(
+	not_null<InputField*> field,
+	QTextCursor cursor,
+	const QString &text,
+	const QString &link);
 
 struct InstantReplaces {
 	struct Node {
@@ -58,97 +76,39 @@ enum class InputSubmitSettings {
 	None,
 };
 
-class FlatInput : public RpWidgetBase<QLineEdit> {
-	// The Q_OBJECT meta info is used for qobject_cast!
-	Q_OBJECT
-
-	using Parent = RpWidgetBase<QLineEdit>;
+class CustomEmojiObject : public QObject, public QTextObjectInterface {
 public:
-	FlatInput(
-		QWidget *parent,
-		const style::FlatInput &st,
-		rpl::producer<QString> placeholder = nullptr,
-		const QString &val = QString());
+	using Factory = Fn<std::unique_ptr<Text::CustomEmoji>(QStringView)>;
 
-	void updatePlaceholder();
-	void setPlaceholder(rpl::producer<QString> placeholder);
-	QRect placeholderRect() const;
+	CustomEmojiObject(Factory factory, Fn<bool()> paused);
+	~CustomEmojiObject();
 
-	void finishAnimations();
+	void *qt_metacast(const char *iid) override;
 
-	void setTextMrg(const QMargins &textMrg);
-	QRect getTextRect() const;
+	QSizeF intrinsicSize(
+		QTextDocument *doc,
+		int posInDocument,
+		const QTextFormat &format) override;
+	void drawObject(
+		QPainter *painter,
+		const QRectF &rect,
+		QTextDocument *doc,
+		int posInDocument,
+		const QTextFormat &format) override;
 
-	QSize sizeHint() const override;
-	QSize minimumSizeHint() const override;
-
-	void customUpDown(bool isCustom);
-	const QString &getLastText() const {
-		return _oldtext;
-	}
-
-public Q_SLOTS:
-	void onTextChange(const QString &text);
-	void onTextEdited();
-
-	void onTouchTimer();
-
-Q_SIGNALS:
-	void changed();
-	void cancelled();
-	void submitted(Qt::KeyboardModifiers);
-	void focused();
-	void blurred();
-
-protected:
-	bool eventHook(QEvent *e) override;
-	void touchEvent(QTouchEvent *e);
-	void paintEvent(QPaintEvent *e) override;
-	void focusInEvent(QFocusEvent *e) override;
-	void focusOutEvent(QFocusEvent *e) override;
-	void keyPressEvent(QKeyEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-	void contextMenuEvent(QContextMenuEvent *e) override;
-	void inputMethodEvent(QInputMethodEvent *e) override;
-
-	virtual void correctValue(const QString &was, QString &now);
-
-	style::font phFont() {
-		return _st.font;
-	}
-
-	void phPrepare(QPainter &p, float64 placeholderFocused);
+	void setNow(crl::time now);
+	void clear();
 
 private:
-	void updatePalette();
-	void refreshPlaceholder(const QString &text);
-
-	QString _oldtext;
-	rpl::variable<QString> _placeholderFull;
-	QString _placeholder;
-
-	bool _customUpDown = false;
-
-	bool _focused = false;
-	bool _placeholderVisible = true;
-	Animations::Simple _placeholderFocusedAnimation;
-	Animations::Simple _placeholderVisibleAnimation;
-	bool _lastPreEditTextNotEmpty = false;
-
-	const style::FlatInput &_st;
-	QMargins _textMrg;
-
-	QTimer _touchTimer;
-	bool _touchPress, _touchRightButton, _touchMove;
-	QPoint _touchStart;
-
-	base::unique_qptr<PopupMenu> _contextMenu;
+	Factory _factory;
+	Fn<bool()> _paused;
+	base::flat_map<uint64, std::unique_ptr<Text::CustomEmoji>> _emoji;
+	crl::time _now = 0;
+	int _skip = 0;
 
 };
 
 class InputField : public RpWidget {
-	Q_OBJECT
-
 public:
 	enum class Mode {
 		SingleLine,
@@ -156,6 +116,7 @@ public:
 		MultiLine,
 	};
 	using TagList = TextWithTags::Tags;
+	using CustomEmojiFactory = Text::CustomEmojiFactory;
 
 	struct MarkdownTag {
 		// With each emoji being QChar::ObjectReplacementCharacter.
@@ -176,6 +137,10 @@ public:
 	static const QString kTagCode;
 	static const QString kTagPre;
 	static const QString kTagSpoiler;
+	static const QString kTagBlockquote;
+	static const QString kCustomEmojiTagStart;
+	static const int kCustomEmojiFormat; // QTextFormat::ObjectTypes
+	static const int kCustomEmojiId; // QTextFormat::Property
 
 	InputField(
 		QWidget *parent,
@@ -194,6 +159,10 @@ public:
 		Mode mode = Mode::SingleLine,
 		rpl::producer<QString> placeholder = nullptr,
 		const TextWithTags &value = TextWithTags());
+
+	[[nodiscard]] const style::InputField &st() const {
+		return _st;
+	}
 
 	void showError();
 	void showErrorNoFocus();
@@ -226,12 +195,10 @@ public:
 
 	// If you need to make some preparations of tags before putting them to QMimeData
 	// (and then to clipboard or to drag-n-drop object), here is a strategy for that.
-	class TagMimeProcessor {
-	public:
-		virtual QString tagFromMimeTag(const QString &mimeTag) = 0;
-		virtual ~TagMimeProcessor() = default;
-	};
-	void setTagMimeProcessor(std::unique_ptr<TagMimeProcessor> &&processor);
+	void setTagMimeProcessor(Fn<QString(QStringView)> processor);
+	void setCustomEmojiFactory(
+		CustomEmojiFactory factory,
+		Fn<bool()> paused = nullptr);
 
 	struct EditLinkSelection {
 		int from = 0;
@@ -254,21 +221,32 @@ public:
 	};
 
 	void setAdditionalMargin(int margin);
+	void setAdditionalMargins(QMargins margins);
 
 	void setInstantReplaces(const InstantReplaces &replaces);
 	void setInstantReplaces(rpl::producer<InstantReplaces> producer);
 	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<bool> enabled);
 	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
-	void commitInstantReplacement(int from, int till, const QString &with);
+	void commitInstantReplacement(
+		int from,
+		int till,
+		const QString &with,
+		const QString &customEmojiData);
 	void commitMarkdownLinkEdit(
 		EditLinkSelection selection,
 		const QString &text,
 		const QString &link);
-	static bool IsValidMarkdownLink(QStringView link);
+	[[nodiscard]] static bool IsValidMarkdownLink(QStringView link);
+	[[nodiscard]] static bool IsCustomEmojiLink(QStringView link);
+	[[nodiscard]] static QString CustomEmojiLink(QStringView entityData);
+	[[nodiscard]] static QString CustomEmojiEntityData(QStringView link);
 
 	const QString &getLastText() const {
 		return _lastTextWithTags.text;
+	}
+	[[nodiscard]] int lastTextSizeWithoutSurrogatePairsCount() const {
+		return _lastTextSizeWithoutSurrogatePairsCount;
 	}
 	void setPlaceholder(
 		rpl::producer<QString> placeholder,
@@ -344,27 +322,18 @@ public:
 		return _markdownTagApplies.events();
 	}
 
+	[[nodiscard]] bool menuShown() const;
+	[[nodiscard]] rpl::producer<bool> menuShownValue() const;
+
+	[[nodiscard]] rpl::producer<> heightChanges() const;
+	[[nodiscard]] rpl::producer<bool> focusedChanges() const;
+	[[nodiscard]] rpl::producer<> tabbed() const;
+	[[nodiscard]] rpl::producer<> cancelled() const;
+	[[nodiscard]] rpl::producer<> changes() const;
+	[[nodiscard]] rpl::producer<Qt::KeyboardModifiers> submits() const;
+	void forceProcessContentsChanges();
+
 	~InputField();
-
-private Q_SLOTS:
-	void onTouchTimer();
-
-	void onDocumentContentsChange(int position, int charsRemoved, int charsAdded);
-	void onCursorPositionChanged();
-
-	void onUndoAvailable(bool avail);
-	void onRedoAvailable(bool avail);
-
-	void onFocusInner();
-
-Q_SIGNALS:
-	void changed();
-	void submitted(Qt::KeyboardModifiers);
-	void cancelled();
-	void tabbed();
-	void focused();
-	void blurred();
-	void resized();
 
 protected:
 	void startPlaceholderAnimation();
@@ -399,15 +368,30 @@ private:
 	void contextMenuEventInner(QContextMenuEvent *e, QMenu *m = nullptr);
 	void dropEventInner(QDropEvent *e);
 	void inputMethodEventInner(QInputMethodEvent *e);
+	void paintEventInner(QPaintEvent *e);
+
+	void mousePressEventInner(QMouseEvent *e);
+	void mouseReleaseEventInner(QMouseEvent *e);
+	void mouseMoveEventInner(QMouseEvent *e);
 
 	QMimeData *createMimeDataFromSelectionInner() const;
 	bool canInsertFromMimeDataInner(const QMimeData *source) const;
 	void insertFromMimeDataInner(const QMimeData *source);
 	TextWithTags getTextWithTagsSelected() const;
 
+	void documentContentsChanged(
+		int position,
+		int charsRemoved,
+		int charsAdded);
+	void focusInner();
+
 	// "start" and "end" are in coordinates of text where emoji are replaced
 	// by ObjectReplacementCharacter. If "end" = -1 means get text till the end.
-	QString getTextPart(
+	struct TextPart final {
+		QString text;
+		int textSizeWithoutSurrogatePairsCount = 0;
+	};
+	TextPart getTextPart(
 		int start,
 		int end,
 		TagList &outTagsList,
@@ -452,13 +436,16 @@ private:
 		int from,
 		int till,
 		const QString &with,
+		const QString &customEmojiData,
 		std::optional<QString> checkOriginal,
 		bool checkIfInMonospace);
+#if 0
 	bool commitMarkdownReplacement(
 		int from,
 		int till,
 		const QString &tag,
 		const QString &edge = QString());
+#endif
 	void addMarkdownTag(int from, int till, const QString &tag);
 	void removeMarkdownTag(int from, int till, const QString &tag);
 	void finishMarkdownTagChange(
@@ -470,7 +457,26 @@ private:
 
 	bool revertFormatReplace();
 
+	void paintSurrounding(
+		QPainter &p,
+		QRect clip,
+		float64 errorDegree,
+		float64 focusedDegree);
+	void paintRoundSurrounding(
+		QPainter &p,
+		QRect clip,
+		float64 errorDegree,
+		float64 focusedDegree);
+	void paintFlatSurrounding(
+		QPainter &p,
+		QRect clip,
+		float64 errorDegree,
+		float64 focusedDegree);
+	void customEmojiRepaint();
 	void highlightMarkdown();
+
+	void touchUpdate(QPoint globalPosition);
+	void touchFinish();
 
 	const style::InputField &_st;
 
@@ -489,10 +495,14 @@ private:
 	TextWithTags _lastTextWithTags;
 	std::vector<MarkdownTag> _lastMarkdownTags;
 	QString _lastPreEditText;
+	int _lastTextSizeWithoutSurrogatePairsCount = 0;
 	std::optional<QString> _inputMethodCommit;
+
+	QMargins _additionalMargins;
 
 	bool _forcePlaceholderHidden = false;
 	bool _reverseMarkdownReplacement = false;
+	bool _customEmojiRepaintScheduled = false;
 
 	// Tags list which we should apply while setText() call or insert from mime data.
 	TagList _insertedTags;
@@ -507,7 +517,8 @@ private:
 	// before _documentContentsChanges fire.
 	int _emojiSurrogateAmount = 0;
 
-	std::unique_ptr<TagMimeProcessor> _tagMimeProcessor;
+	Fn<QString(QStringView)> _tagMimeProcessor;
+	std::unique_ptr<CustomEmojiObject> _customEmojiObject;
 
 	SubmitSettings _submitSettings = SubmitSettings::Enter;
 	bool _markdownEnabled = false;
@@ -515,7 +526,6 @@ private:
 	bool _redoAvailable = false;
 	bool _inDrop = false;
 	bool _inHeightCheck = false;
-	int _additionalMargin = 0;
 
 	bool _customUpDown = false;
 	bool _customTab = false;
@@ -538,14 +548,16 @@ private:
 	bool _focused = false;
 	bool _error = false;
 
-	QTimer _touchTimer;
+	base::Timer _touchTimer;
 	bool _touchPress = false;
 	bool _touchRightButton = false;
 	bool _touchMove = false;
+	bool _mousePressedInTouch = false;
 	QPoint _touchStart;
 
 	bool _correcting = false;
 	MimeDataHook _mimeDataHook;
+	rpl::event_stream<bool> _menuShownChanges;
 	base::unique_qptr<PopupMenu> _contextMenu;
 
 	QTextCharFormat _defaultCharFormat;
@@ -558,196 +570,17 @@ private:
 	rpl::event_stream<DocumentChangeInfo> _documentContentsChanges;
 	rpl::event_stream<MarkdownTag> _markdownTagApplies;
 
-};
-
-class MaskedInputField : public RpWidgetBase<QLineEdit> {
-	// The Q_OBJECT meta info is used for qobject_cast!
-	Q_OBJECT
-
-	using Parent = RpWidgetBase<QLineEdit>;
-public:
-	MaskedInputField(
-		QWidget *parent,
-		const style::InputField &st,
-		rpl::producer<QString> placeholder = nullptr,
-		const QString &val = QString());
-
-	void showError();
-	void showErrorNoFocus();
-	void hideError();
-
-	QRect getTextRect() const;
-
-	QSize sizeHint() const override;
-	QSize minimumSizeHint() const override;
-
-	void customUpDown(bool isCustom);
-	int borderAnimationStart() const;
-
-	const QString &getLastText() const {
-		return _oldtext;
-	}
-	void setPlaceholder(rpl::producer<QString> placeholder);
-	void setPlaceholderHidden(bool forcePlaceholderHidden);
-	void setDisplayFocused(bool focused);
-	void finishAnimating();
-	void setFocusFast() {
-		setDisplayFocused(true);
-		setFocus();
-	}
-
-	void setText(const QString &text) {
-		QLineEdit::setText(text);
-		startPlaceholderAnimation();
-	}
-	void clear() {
-		QLineEdit::clear();
-		startPlaceholderAnimation();
-	}
-
-public Q_SLOTS:
-	void onTextChange(const QString &text);
-	void onCursorPositionChanged(int oldPosition, int position);
-
-	void onTextEdited();
-
-	void onTouchTimer();
-
-Q_SIGNALS:
-	void changed();
-	void cancelled();
-	void submitted(Qt::KeyboardModifiers);
-	void focused();
-	void blurred();
-
-protected:
-	QString getDisplayedText() const {
-		auto result = getLastText();
-		if (!_lastPreEditText.isEmpty()) {
-			result = result.mid(0, _oldcursor) + _lastPreEditText + result.mid(_oldcursor);
-		}
-		return result;
-	}
-	void startBorderAnimation();
-	void startPlaceholderAnimation();
-
-	bool eventHook(QEvent *e) override;
-	void touchEvent(QTouchEvent *e);
-	void paintEvent(QPaintEvent *e) override;
-	void focusInEvent(QFocusEvent *e) override;
-	void focusOutEvent(QFocusEvent *e) override;
-	void keyPressEvent(QKeyEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-	void contextMenuEvent(QContextMenuEvent *e) override;
-	void inputMethodEvent(QInputMethodEvent *e) override;
-
-	virtual void correctValue(
-		const QString &was,
-		int wasCursor,
-		QString &now,
-		int &nowCursor) {
-	}
-	void setCorrectedText(QString &now, int &nowCursor, const QString &newText, int newPos);
-
-	virtual void paintAdditionalPlaceholder(Painter &p) {
-	}
-
-	style::font phFont() {
-		return _st.font;
-	}
-
-	void placeholderAdditionalPrepare(Painter &p);
-	QRect placeholderRect() const;
-
-	void setTextMargins(const QMargins &mrg);
-	const style::InputField &_st;
-
-private:
-	void updatePalette();
-	void refreshPlaceholder(const QString &text);
-	void setErrorShown(bool error);
-
-	void setFocused(bool focused);
-
-	int _maxLength = -1;
-	bool _forcePlaceholderHidden = false;
-
-	QString _oldtext;
-	int _oldcursor = 0;
-	QString _lastPreEditText;
-
-	bool _undoAvailable = false;
-	bool _redoAvailable = false;
-
-	bool _customUpDown = false;
-
-	rpl::variable<QString> _placeholderFull;
-	QString _placeholder;
-	Animations::Simple _a_placeholderShifted;
-	bool _placeholderShifted = false;
-	QPainterPath _placeholderPath;
-
-	Animations::Simple _a_borderShown;
-	int _borderAnimationStart = 0;
-	Animations::Simple _a_borderOpacity;
-	bool _borderVisible = false;
-
-	Animations::Simple _a_focused;
-	Animations::Simple _a_error;
-
-	bool _focused = false;
-	bool _error = false;
-
-	style::margins _textMargins;
-
-	QTimer _touchTimer;
-	bool _touchPress = false;
-	bool _touchRightButton = false;
-	bool _touchMove = false;
-	QPoint _touchStart;
-
-	base::unique_qptr<PopupMenu> _contextMenu;
+	rpl::event_stream<bool> _focusedChanges;
+	rpl::event_stream<> _heightChanges;
+	rpl::event_stream<> _tabbed;
+	rpl::event_stream<> _cancelled;
+	rpl::event_stream<> _changes;
+	rpl::event_stream<Qt::KeyboardModifiers> _submits;
 
 };
 
-class PasswordInput : public MaskedInputField {
-public:
-	PasswordInput(QWidget *parent, const style::InputField &st, rpl::producer<QString> placeholder = nullptr, const QString &val = QString());
+void PrepareFormattingOptimization(not_null<QTextDocument*> document);
 
-};
-
-class NumberInput : public MaskedInputField {
-public:
-	NumberInput(
-		QWidget *parent,
-		const style::InputField &st,
-		rpl::producer<QString> placeholder,
-		const QString &value,
-		int limit);
-
-protected:
-	void correctValue(
-		const QString &was,
-		int wasCursor,
-		QString &now,
-		int &nowCursor) override;
-
-private:
-	int _limit = 0;
-
-};
-
-class HexInput : public MaskedInputField {
-public:
-	HexInput(QWidget *parent, const style::InputField &st, rpl::producer<QString> placeholder, const QString &val);
-
-protected:
-	void correctValue(
-		const QString &was,
-		int wasCursor,
-		QString &now,
-		int &nowCursor) override;
-
-};
+[[nodiscard]] int FieldCharacterCount(not_null<InputField*> field);
 
 } // namespace Ui

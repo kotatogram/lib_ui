@@ -13,6 +13,7 @@
 #include "ui/painter.h"
 #include "styles/style_widgets.h"
 #include "styles/style_layers.h"
+#include "styles/palette.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QWindow>
@@ -24,6 +25,90 @@ namespace {
 
 [[nodiscard]] const style::Shadow &Shadow() {
 	return st::callShadow;
+}
+
+[[nodiscard]] int Radius() {
+	return st::callRadius;
+}
+
+[[nodiscard]] std::array<QImage, 4> PrepareSides(
+		const style::Shadow &shadow) {
+	auto result = std::array<QImage, 4>();
+	const auto extend = shadow.extend;
+	const auto make = [&](
+			int index,
+			const style::icon &icon,
+			auto &&postprocess) {
+		result[index] = icon.instance(st::windowShadowFg->c);
+		auto p = QPainter(&result[index]);
+		p.setCompositionMode(QPainter::CompositionMode_Source);
+		postprocess(p, icon.width(), icon.height());
+	};
+	make(0, shadow.left, [&](QPainter &p, int width, int height) {
+		const auto skip = extend.left();
+		p.fillRect(skip, 0, width - skip, height, Qt::transparent);
+	});
+	make(1, shadow.top, [&](QPainter &p, int width, int height) {
+		const auto skip = extend.top();
+		p.fillRect(0, skip, width, height - skip, Qt::transparent);
+	});
+	make(2, shadow.right, [&](QPainter &p, int width, int height) {
+		const auto skip = extend.right();
+		p.fillRect(0, 0, width - skip, height, Qt::transparent);
+	});
+	make(3, shadow.bottom, [&](QPainter &p, int width, int height) {
+		const auto skip = extend.bottom();
+		p.fillRect(0, 0, width, height - skip, Qt::transparent);
+	});
+	return result;
+}
+
+[[nodiscard]] std::array<QImage, 4> PrepareCorners(
+		const style::Shadow &shadow,
+		int radius) {
+	auto result = std::array<QImage, 4>();
+	const auto extend = shadow.extend;
+	const auto make = [&](
+			int index,
+			const style::icon &icon,
+			auto &&postprocess) {
+		result[index] = icon.instance(st::windowShadowFg->c);
+		auto p = QPainter(&result[index]);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setCompositionMode(QPainter::CompositionMode_Source);
+		p.setBrush(Qt::transparent);
+		p.setPen(Qt::NoPen);
+		postprocess(p, icon.width(), icon.height());
+	};
+	make(0, shadow.topLeft, [&](QPainter &p, int width, int height) {
+		const auto skipx = extend.left();
+		const auto skipy = extend.top();
+		width += 2 * radius;
+		height += 2 * radius;
+		p.drawRoundedRect(skipx, skipy, width, height, radius, radius);
+	});
+	make(1, shadow.bottomLeft, [&](QPainter &p, int width, int height) {
+		const auto skipx = extend.left();
+		const auto skipy = extend.bottom() + 2 * radius;
+		width += 2 * radius;
+		height += 2 * radius;
+		p.drawRoundedRect(skipx, -skipy, width, height, radius, radius);
+	});
+	make(2, shadow.topRight, [&](QPainter &p, int width, int height) {
+		const auto skipx = extend.right() + 2 * radius;
+		const auto skipy = extend.top();
+		width += 2 * radius;
+		height += 2 * radius;
+		p.drawRoundedRect(-skipx, skipy, width, height, radius, radius);
+	});
+	make(3, shadow.bottomRight, [&](QPainter &p, int width, int height) {
+		const auto skipx = extend.right() + 2 * radius;
+		const auto skipy = extend.bottom() + 2 * radius;
+		width += 2 * radius;
+		height += 2 * radius;
+		p.drawRoundedRect(-skipx, -skipy, width, height, radius, radius);
+	});
+	return result;
 }
 
 } // namespace
@@ -65,6 +150,14 @@ rpl::producer<HitTestResult> BasicWindowHelper::systemButtonDown() const {
 	return rpl::never<HitTestResult>();
 }
 
+void BasicWindowHelper::overrideSystemButtonOver(HitTestResult button) {
+	Expects(button == HitTestResult::None);
+}
+
+void BasicWindowHelper::overrideSystemButtonDown(HitTestResult button) {
+	Expects(button == HitTestResult::None);
+}
+
 void BasicWindowHelper::setTitle(const QString &title) {
 	_window->setWindowTitle(title);
 }
@@ -103,6 +196,10 @@ void BasicWindowHelper::close() {
 	_window->close();
 }
 
+int BasicWindowHelper::manualRoundingRadius() const {
+	return 0;
+}
+
 void BasicWindowHelper::setBodyTitleArea(
 		Fn<WindowTitleHitTestFlags(QPoint)> testMethod) {
 	Expects(!_bodyTitleAreaTestMethod || testMethod);
@@ -114,6 +211,10 @@ void BasicWindowHelper::setBodyTitleArea(
 		setupBodyTitleAreaEvents();
 	}
 	_bodyTitleAreaTestMethod = std::move(testMethod);
+}
+
+const style::TextStyle &BasicWindowHelper::titleTextStyle() const {
+	return st::defaultWindowTitle.style;
 }
 
 QMargins BasicWindowHelper::nativeFrameMargins() const {
@@ -173,6 +274,10 @@ void BasicWindowHelper::setupBodyTitleAreaEvents() {
 #endif // Q_OS_WIN
 				_mousePressed = false;
 				_window->windowHandle()->startSystemMove();
+				SendSynteticMouseEvent(
+					body().get(),
+					QEvent::MouseButtonRelease,
+					Qt::LeftButton);
 			}
 		}
 	}, body()->lifetime());
@@ -181,44 +286,53 @@ void BasicWindowHelper::setupBodyTitleAreaEvents() {
 DefaultWindowHelper::DefaultWindowHelper(not_null<RpWidget*> window)
 : BasicWindowHelper(window)
 , _title(Ui::CreateChild<DefaultTitleWidget>(window.get()))
-, _body(Ui::CreateChild<RpWidget>(window.get())) {
+, _body(Ui::CreateChild<RpWidget>(window.get()))
+, _roundRect(Radius(), st::windowBg)
+, _sides(PrepareSides(Shadow()))
+, _corners(PrepareCorners(Shadow(), Radius())) {
 	init();
 }
 
 void DefaultWindowHelper::init() {
-	_title->show();
-	window()->setWindowFlag(Qt::FramelessWindowHint);
-
-	if (WindowExtentsSupported()) {
+	if (WindowMarginsSupported()) {
 		window()->setAttribute(Qt::WA_TranslucentBackground);
 	}
+
+	window()->createWinId();
+	_title->show();
 
 	rpl::combine(
 		window()->widthValue(),
 		_windowState.value(),
-		_title->shownValue()
+		_title->shownValue(),
+		TitleControlsLayoutValue()
 	) | rpl::start_with_next([=](
 			int width,
 			Qt::WindowStates windowState,
-			bool shown) {
+			bool shown,
+			TitleControls::Layout controlsLayout) {
 		const auto area = resizeArea();
 		_title->setGeometry(
 			area.left(),
 			area.top(),
 			width - area.left() - area.right(),
-			_title->st()->height);
+			_title->controlsGeometry().height()
+				? _title->st()->height
+				: 0);
 	}, _title->lifetime());
 
 	rpl::combine(
 		window()->sizeValue(),
 		_windowState.value(),
 		_title->heightValue(),
-		_title->shownValue()
+		_title->shownValue(),
+		TitleControlsLayoutValue()
 	) | rpl::start_with_next([=](
 			QSize size,
 			Qt::WindowStates windowState,
 			int titleHeight,
-			bool titleShown) {
+			bool titleShown,
+			TitleControls::Layout controlsLayout) {
 		const auto area = resizeArea();
 
 		const auto sizeWithoutMargins = size
@@ -230,36 +344,27 @@ void DefaultWindowHelper::init() {
 			area.top() + (titleShown ? titleHeight : 0));
 
 		_body->setGeometry(QRect(topLeft, sizeWithoutMargins));
+		updateRoundingOverlay();
 	}, _body->lifetime());
 
 	window()->paintRequest(
-	) | rpl::start_with_next([=] {
-		const auto area = resizeArea();
-
-		if (area.isNull()) {
-			return;
-		}
-
+	) | rpl::filter([=] {
+		return !hasShadow() && !resizeArea().isNull();
+	}) | rpl::start_with_next([=] {
 		Painter p(window());
-
-		if (hasShadow()) {
-			Ui::Shadow::paint(
-				p,
-				QRect(QPoint(), window()->size()).marginsRemoved(area),
-				window()->width(),
-				Shadow());
-		} else {
-			paintBorders(p);
-		}
+		paintBorders(p);
 	}, window()->lifetime());
 
 	rpl::combine(
 		window()->shownValue(),
+		_title->shownValue(),
 		_windowState.value()
-	) | rpl::start_with_next([=](bool shown, Qt::WindowStates windowState) {
-		if (shown) {
-			updateWindowExtents();
-		}
+	) | rpl::start_with_next([=](
+			bool shown,
+			bool titleShown,
+			Qt::WindowStates windowState) {
+		window()->windowHandle()->setFlag(Qt::FramelessWindowHint, titleShown);
+		updateWindowMargins();
 	}, window()->lifetime());
 
 	window()->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
@@ -270,6 +375,10 @@ void DefaultWindowHelper::init() {
 
 			if (mouseEvent->button() == Qt::LeftButton && edges) {
 				window()->windowHandle()->startSystemResize(edges);
+				SendSynteticMouseEvent(
+					window().get(),
+					QEvent::MouseButtonRelease,
+					Qt::LeftButton);
 			}
 		} else if (e->type() == QEvent::WindowStateChange) {
 			_windowState = window()->windowState();
@@ -277,6 +386,52 @@ void DefaultWindowHelper::init() {
 	}, window()->lifetime());
 
 	QCoreApplication::instance()->installEventFilter(this);
+}
+
+void DefaultWindowHelper::updateRoundingOverlay() {
+	if (!hasShadow() || resizeArea().isNull()) {
+		_roundingOverlay.destroy();
+		return;
+	} else if (_roundingOverlay) {
+		return;
+	}
+
+	_roundingOverlay.create(window());
+	_roundingOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_roundingOverlay->show();
+
+	window()->sizeValue(
+	) | rpl::start_with_next([=](QSize size) {
+		_roundingOverlay->setGeometry(QRect(QPoint(), size));
+	}, _roundingOverlay->lifetime());
+
+	_roundingOverlay->paintRequest(
+	) | rpl::filter([=](QRect clip) {
+		const auto rect = window()->rect().marginsRemoved(resizeArea());
+		const auto radius = Radius();
+		const auto radiusWithFix = radius - 1;
+		const auto radiusSize = QSize(radius, radius);
+		return clip.intersects(QRect(
+				rect.topLeft(),
+				radiusSize
+			)) || clip.intersects(QRect(
+				rect.topRight() - QPoint(radiusWithFix, 0),
+				radiusSize
+			)) || clip.intersects(QRect(
+				rect.bottomLeft() - QPoint(0, radiusWithFix),
+				radiusSize
+			)) || clip.intersects(QRect(
+				rect.bottomRight() - QPoint(radiusWithFix, radiusWithFix),
+				radiusSize
+			)) || !rect.contains(clip);
+	}) | rpl::start_with_next([=] {
+		Painter p(_roundingOverlay);
+		const auto rect = window()->rect().marginsRemoved(resizeArea());
+		p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+		_roundRect.paint(p, rect, RectPart::AllCorners);
+		p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+		Shadow::paint(p, rect, window()->width(), Shadow(), _sides, _corners);
+	}, _roundingOverlay->lifetime());
 }
 
 not_null<RpWidget*> DefaultWindowHelper::body() {
@@ -290,14 +445,14 @@ QMargins DefaultWindowHelper::frameMargins() {
 }
 
 bool DefaultWindowHelper::hasShadow() const {
-	const auto center = window()->geometry().center();
-	return WindowExtentsSupported() && TranslucentWindowsSupported(center);
+	return WindowMarginsSupported() && TranslucentWindowsSupported();
 }
 
 QMargins DefaultWindowHelper::resizeArea() const {
 	if (window()->isMaximized()
 		|| window()->isFullScreen()
-		|| _title->isHidden()) {
+		|| _title->isHidden()
+		|| (!hasShadow() && !_title->controlsGeometry().height())) {
 		return QMargins();
 	}
 
@@ -375,9 +530,7 @@ void DefaultWindowHelper::setTitleStyle(const style::WindowTitle &st) {
 }
 
 void DefaultWindowHelper::setNativeFrame(bool enabled) {
-	window()->windowHandle()->setFlag(Qt::FramelessWindowHint, !enabled);
 	_title->setVisible(!enabled);
-	updateWindowExtents();
 }
 
 void DefaultWindowHelper::setMinimumSize(QSize size) {
@@ -393,6 +546,10 @@ void DefaultWindowHelper::setFixedSize(QSize size) {
 
 void DefaultWindowHelper::setGeometry(QRect rect) {
 	window()->setGeometry(rect.marginsAdded(bodyPadding()));
+}
+
+int DefaultWindowHelper::manualRoundingRadius() const {
+	return _roundingOverlay ? Radius() : 0;
 }
 
 void DefaultWindowHelper::paintBorders(QPainter &p) {
@@ -439,16 +596,13 @@ void DefaultWindowHelper::paintBorders(QPainter &p) {
 		borderColor);
 }
 
-void DefaultWindowHelper::updateWindowExtents() {
+void DefaultWindowHelper::updateWindowMargins() {
 	if (hasShadow() && !_title->isHidden()) {
-		Platform::SetWindowExtents(
-			window()->windowHandle(),
-			resizeArea());
-
-		_extentsSet = true;
-	} else if (_extentsSet) {
-		Platform::UnsetWindowExtents(window()->windowHandle());
-		_extentsSet = false;
+		SetWindowMargins(window(), resizeArea());
+		_marginsSet = true;
+	} else if (_marginsSet) {
+		UnsetWindowMargins(window());
+		_marginsSet = false;
 	}
 }
 

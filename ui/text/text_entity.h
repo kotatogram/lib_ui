@@ -6,6 +6,7 @@
 //
 #pragma once
 
+#include "base/qt/qt_compare.h"
 #include "base/basic_types.h"
 #include "base/algorithm.h"
 
@@ -23,9 +24,10 @@ enum class EntityType : uchar {
 	Cashtag,
 	Mention,
 	MentionName,
+	CustomEmoji,
 	BotCommand,
 	MediaTimestamp,
-	PlainLink, // Senders in chat list, attachements in chat list, etc.
+	Colorized, // Senders in chat list, attachments in chat list, etc.
 
 	Bold,
 	Semibold,
@@ -34,6 +36,7 @@ enum class EntityType : uchar {
 	StrikeOut,
 	Code, // inline
 	Pre,  // block
+	Blockquote,
 	Spoiler,
 };
 
@@ -47,10 +50,17 @@ struct EntityLinkData {
 	QString data;
 	EntityType type = EntityType::Invalid;
 	EntityLinkShown shown = EntityLinkShown::Full;
+
+	friend inline auto operator<=>(
+		const EntityLinkData &,
+		const EntityLinkData &) = default;
+	friend inline bool operator==(
+		const EntityLinkData &,
+		const EntityLinkData &) = default;
 };
 
 class EntityInText;
-using EntitiesInText = QList<EntityInText>;
+using EntitiesInText = QVector<EntityInText>;
 
 class EntityInText {
 public:
@@ -60,16 +70,16 @@ public:
 		int length,
 		const QString &data = QString());
 
-	EntityType type() const {
+	[[nodiscard]] EntityType type() const {
 		return _type;
 	}
-	int offset() const {
+	[[nodiscard]] int offset() const {
 		return _offset;
 	}
-	int length() const {
+	[[nodiscard]] int length() const {
 		return _length;
 	}
-	QString data() const {
+	[[nodiscard]] QString data() const {
 		return _data;
 	}
 
@@ -105,13 +115,20 @@ public:
 		}
 	}
 
-	static int FirstMonospaceOffset(
+	[[nodiscard]] static int FirstMonospaceOffset(
 		const EntitiesInText &entities,
 		int textLength);
 
 	explicit operator bool() const {
 		return type() != EntityType::Invalid;
 	}
+
+	friend inline auto operator<=>(
+		const EntityInText &,
+		const EntityInText &) = default;
+	friend inline bool operator==(
+		const EntityInText &,
+		const EntityInText &) = default;
 
 private:
 	EntityType _type = EntityType::Invalid;
@@ -120,17 +137,6 @@ private:
 	QString _data;
 
 };
-
-inline bool operator==(const EntityInText &a, const EntityInText &b) {
-	return (a.type() == b.type())
-		&& (a.offset() == b.offset())
-		&& (a.length() == b.length())
-		&& (a.data() == b.data());
-}
-
-inline bool operator!=(const EntityInText &a, const EntityInText &b) {
-	return !(a == b);
-}
 
 struct TextWithEntities {
 	QString text;
@@ -154,6 +160,16 @@ struct TextWithEntities {
 		entities.append(other.entities);
 		return *this;
 	}
+	TextWithEntities &append(const TextWithEntities &other) {
+		const auto shift = text.size();
+		text.append(other.text);
+		entities.reserve(entities.size() + other.entities.size());
+		for (auto entity : other.entities) {
+			entity.shiftRight(shift);
+			entities.append(entity);
+		}
+		return *this;
+	}
 	TextWithEntities &append(const QString &other) {
 		text.append(other);
 		return *this;
@@ -172,19 +188,14 @@ struct TextWithEntities {
 		result.text = simple;
 		return result;
 	}
+
+	friend inline auto operator<=>(
+		const TextWithEntities &,
+		const TextWithEntities &) = default;
+	friend inline bool operator==(
+		const TextWithEntities &,
+		const TextWithEntities &) = default;
 };
-
-inline bool operator==(
-		const TextWithEntities &a,
-		const TextWithEntities &b) {
-	return (a.text == b.text) && (a.entities == b.entities);
-}
-
-inline bool operator!=(
-		const TextWithEntities &a,
-		const TextWithEntities &b) {
-	return !(a == b);
-}
 
 struct TextForMimeData {
 	QString expanded;
@@ -224,6 +235,7 @@ struct TextForMimeData {
 		return *this;
 	}
 
+	static TextForMimeData WithExpandedLinks(const TextWithEntities &text);
 	static TextForMimeData Rich(TextWithEntities &&rich) {
 		auto result = TextForMimeData();
 		result.expanded = rich.text;
@@ -244,7 +256,7 @@ enum {
 	TextParseHashtags = 0x008,
 	TextParseBotCommands = 0x010,
 	TextParseMarkdown = 0x020,
-	TextParsePlainLinks = 0x040,
+	TextParseColorized = 0x040,
 };
 
 struct TextWithTags {
@@ -252,26 +264,25 @@ struct TextWithTags {
 		int offset = 0;
 		int length = 0;
 		QString id;
+
+		friend inline auto operator<=>(const Tag &, const Tag &) = default;
+		friend inline bool operator==(const Tag &, const Tag &) = default;
 	};
 	using Tags = QVector<Tag>;
 
 	QString text;
 	Tags tags;
+
+	[[nodiscard]] bool empty() const {
+		return text.isEmpty();
+	}
+	friend inline auto operator<=>(
+		const TextWithTags &,
+		const TextWithTags &) = default;
+	friend inline bool operator==(
+		const TextWithTags &,
+		const TextWithTags &) = default;
 };
-
-inline bool operator==(const TextWithTags::Tag &a, const TextWithTags::Tag &b) {
-	return (a.offset == b.offset) && (a.length == b.length) && (a.id == b.id);
-}
-inline bool operator!=(const TextWithTags::Tag &a, const TextWithTags::Tag &b) {
-	return !(a == b);
-}
-
-inline bool operator==(const TextWithTags &a, const TextWithTags &b) {
-	return (a.text == b.text) && (a.tags == b.tags);
-}
-inline bool operator!=(const TextWithTags &a, const TextWithTags &b) {
-	return !(a == b);
-}
 
 // Parsing helpers.
 
@@ -285,6 +296,7 @@ const QRegularExpression &RegExpHashtag();
 const QRegularExpression &RegExpHashtagExclude();
 const QRegularExpression &RegExpMention();
 const QRegularExpression &RegExpBotCommand();
+const QRegularExpression &RegExpDigitsExclude();
 QString MarkdownBoldGoodBefore();
 QString MarkdownBoldBadAfter();
 QString MarkdownItalicGoodBefore();
@@ -308,31 +320,13 @@ QStringList PrepareSearchWords(const QString &query, const QRegularExpression *S
 bool CutPart(TextWithEntities &sending, TextWithEntities &left, int limit);
 
 struct MentionNameFields {
-	MentionNameFields(uint64 userId = 0, uint64 accessHash = 0)
-	: userId(userId), accessHash(accessHash) {
-	}
+	uint64 selfId = 0;
 	uint64 userId = 0;
 	uint64 accessHash = 0;
 };
-
-inline MentionNameFields MentionNameDataToFields(const QString &data) {
-	auto components = data.split('.');
-	if (!components.isEmpty()) {
-		return {
-			components.at(0).toULongLong(),
-			(components.size() > 1) ? components.at(1).toULongLong() : 0
-		};
-	}
-	return MentionNameFields{};
-}
-
-inline QString MentionNameDataFromFields(const MentionNameFields &fields) {
-	auto result = QString::number(fields.userId);
-	if (fields.accessHash) {
-		result += '.' + QString::number(fields.accessHash);
-	}
-	return result;
-}
+[[nodiscard]] MentionNameFields MentionNameDataToFields(QStringView data);
+[[nodiscard]] QString MentionNameDataFromFields(
+	const MentionNameFields &fields);
 
 // New entities are added to the ones that are already in result.
 // Changes text if (flags & TextParseMarkdown).
@@ -364,12 +358,13 @@ void ApplyServerCleaning(TextWithEntities &result);
 [[nodiscard]] QString TagsMimeType();
 [[nodiscard]] QString TagsTextMimeType();
 
-inline const auto kMentionTagStart = qstr("mention://user.");
+inline const auto kMentionTagStart = qstr("mention://");
 
 [[nodiscard]] bool IsMentionLink(QStringView link);
+[[nodiscard]] QString MentionEntityData(QStringView link);
 [[nodiscard]] bool IsSeparateTag(QStringView tag);
 [[nodiscard]] QString JoinTag(const QList<QStringView> &list);
-[[nodiscard]] QList<QStringView> SplitTags(const QString &tag);
+[[nodiscard]] QList<QStringView> SplitTags(QStringView tag);
 [[nodiscard]] QString TagWithRemoved(
 	const QString &tag,
 	const QString &removed);

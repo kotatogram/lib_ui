@@ -6,15 +6,9 @@
 //
 #pragma once
 
+#include "base/platform/win/base_windows_rpcndr_h.h"
+#include "base/platform/win/base_windows_gdiplus_h.h"
 #include "base/flags.h"
-
-#include <windows.h>
-
-#define min(a, b) ((a) < (b) ? (a) : (b))
-#define max(a, b) ((a) < (b) ? (b) : (a))
-#include <gdiplus.h>
-#undef min
-#undef max
 
 class QColor;
 
@@ -78,7 +72,6 @@ private:
 
 	const not_null<RpWidget*> _window;
 	const HWND _handle;
-	const bool _windows11 = false;
 
 	int _x = 0;
 	int _y = 0;

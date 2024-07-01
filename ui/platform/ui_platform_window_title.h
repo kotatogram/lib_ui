@@ -19,6 +19,7 @@ struct WindowTitle;
 namespace Ui {
 
 class IconButton;
+class AbstractButton;
 class PlainShadow;
 class RpWindow;
 
@@ -55,11 +56,58 @@ void SetupSemiNativeSystemButtons(
 	rpl::lifetime &lifetime,
 	Fn<bool()> filter = nullptr);
 
+enum class TitleControl {
+	Unknown,
+	Minimize,
+	Maximize,
+	Close,
+};
+
+class AbstractTitleButtons {
+public:
+	[[nodiscard]] virtual object_ptr<AbstractButton> create(
+		not_null<QWidget*> parent,
+		TitleControl control,
+		const style::WindowTitle &st) = 0;
+	virtual void updateState(
+		bool active,
+		bool maximized,
+		const style::WindowTitle &st) = 0;
+	virtual void notifySynteticOver(TitleControl control, bool over) = 0;
+
+	virtual ~AbstractTitleButtons() = default;
+};
+
+class IconTitleButtons final : public AbstractTitleButtons {
+public:
+	object_ptr<AbstractButton> create(
+		not_null<QWidget*> parent,
+		TitleControl control,
+		const style::WindowTitle &st) override;
+	void updateState(
+		bool active,
+		bool maximized,
+		const style::WindowTitle &st) override;
+	void notifySynteticOver(TitleControl control, bool over) override {
+	}
+
+private:
+	QPointer<IconButton> _minimize;
+	QPointer<IconButton> _maximizeRestore;
+	QPointer<IconButton> _close;
+
+};
+
 class TitleControls final {
 public:
 	TitleControls(
 		not_null<RpWidget*> parent,
 		const style::WindowTitle &st,
+		Fn<void(bool maximized)> maximize = nullptr);
+	TitleControls(
+		not_null<RpWidget*> parent,
+		const style::WindowTitle &st,
+		std::unique_ptr<AbstractTitleButtons> buttons,
 		Fn<void(bool maximized)> maximize = nullptr);
 
 	void setStyle(const style::WindowTitle &st);
@@ -68,29 +116,21 @@ public:
 	void setResizeEnabled(bool enabled);
 	void raise();
 
-	[[nodiscard]] HitTestResult hitTest(QPoint point) const;
+	[[nodiscard]] HitTestResult hitTest(QPoint point, int padding) const;
 
 	void buttonOver(HitTestResult testResult);
 	void buttonDown(HitTestResult testResult);
 
-	enum class Control {
-		Unknown,
-		Minimize,
-		Maximize,
-		Close,
-	};
-
+	using Control = TitleControl;
 	struct Layout {
 		std::vector<Control> left;
 		std::vector<Control> right;
 	};
 
 private:
-	class Button;
-
 	[[nodiscard]] not_null<RpWidget*> parent() const;
 	[[nodiscard]] not_null<QWidget*> window() const;
-	[[nodiscard]] Button *controlWidget(Control control) const;
+	[[nodiscard]] AbstractButton *controlWidget(Control control) const;
 
 	void init(Fn<void(bool maximized)> maximize);
 	void subscribeToStateChanges();
@@ -102,10 +142,11 @@ private:
 	void handleWindowStateChanged(Qt::WindowState state = Qt::WindowNoState);
 
 	not_null<const style::WindowTitle*> _st;
+	const std::unique_ptr<AbstractTitleButtons> _buttons;
 
-	object_ptr<Button> _minimize;
-	object_ptr<Button> _maximizeRestore;
-	object_ptr<Button> _close;
+	object_ptr<AbstractButton> _minimize;
+	object_ptr<AbstractButton> _maximizeRestore;
+	object_ptr<AbstractButton> _close;
 
 	bool _maximizedState = false;
 	bool _activeState = false;
@@ -113,11 +154,36 @@ private:
 
 };
 
+namespace internal {
+
+// Actual requestor, cached by the public interface
+[[nodiscard]] TitleControls::Layout TitleControlsLayout();
+void NotifyTitleControlsLayoutChanged(
+    const std::optional<TitleControls::Layout> &layout = std::nullopt);
+
+} // namespace internal
+
+[[nodiscard]] TitleControls::Layout TitleControlsLayout();
+[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutValue();
+[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutChanged();
+[[nodiscard]] inline bool TitleControlsOnLeft(
+		const TitleControls::Layout &layout = TitleControlsLayout()) {
+	if (ranges::contains(layout.left, TitleControl::Close)) {
+		return true;
+	} else if (ranges::contains(layout.right, TitleControl::Close)) {
+		return false;
+	} else if (layout.left.size() > layout.right.size()) {
+		return true;
+	}
+	return false;
+}
+
 class DefaultTitleWidget : public RpWidget {
 public:
 	explicit DefaultTitleWidget(not_null<RpWidget*> parent);
 
 	[[nodiscard]] not_null<const style::WindowTitle*> st() const;
+	[[nodiscard]] QRect controlsGeometry() const;
 	void setText(const QString &text);
 	void setStyle(const style::WindowTitle &st);
 	void setResizeEnabled(bool enabled);
@@ -142,6 +208,11 @@ struct SeparateTitleControls {
 		QWidget *parent,
 		const style::WindowTitle &st,
 		Fn<void(bool maximized)> maximize);
+	SeparateTitleControls(
+		QWidget *parent,
+		const style::WindowTitle &st,
+		std::unique_ptr<AbstractTitleButtons> buttons,
+		Fn<void(bool maximized)> maximize);
 
 	RpWidget wrap;
 	TitleControls controls;
@@ -150,7 +221,14 @@ struct SeparateTitleControls {
 [[nodiscard]] auto SetupSeparateTitleControls(
 	not_null<RpWindow*> window,
 	const style::WindowTitle &st,
-	Fn<void(bool maximized)> maximize = nullptr)
+	Fn<void(bool maximized)> maximize = nullptr,
+	rpl::producer<int> controlsTop = nullptr)
+-> std::unique_ptr<SeparateTitleControls>;
+
+[[nodiscard]] auto SetupSeparateTitleControls(
+	not_null<RpWindow*> window,
+	std::unique_ptr<SeparateTitleControls> created,
+	rpl::producer<int> controlsTop = nullptr)
 -> std::unique_ptr<SeparateTitleControls>;
 
 } // namespace Platform

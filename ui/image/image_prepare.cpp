@@ -15,12 +15,14 @@
 #include "styles/palette.h"
 #include "styles/style_basic.h"
 
-#include "zlib.h"
+#include <zlib.h>
 #include <QtCore/QFile>
 #include <QtCore/QBuffer>
 #include <QtCore/QMutex>
 #include <QtGui/QImageReader>
 #include <QtSvg/QSvgRenderer>
+
+#include <jpeglib.h>
 
 namespace Images {
 namespace {
@@ -35,7 +37,7 @@ TG_FORCE_INLINE uint64 BlurGetColors(const uchar *p) {
 		+ ((uint64)p[3] << 48);
 }
 
-const QImage &CircleMask(QSize size) {
+const QImage &EllipseMaskCached(QSize size) {
 	const auto key = (uint64(uint32(size.width())) << 32)
 		| uint64(uint32(size.height()));
 
@@ -48,17 +50,7 @@ const QImage &CircleMask(QSize size) {
 	}
 	lock.unlock();
 
-	auto mask = QImage(
-		size,
-		QImage::Format_ARGB32_Premultiplied);
-	mask.fill(Qt::transparent);
-	{
-		QPainter p(&mask);
-		PainterHighQualityEnabler hq(p);
-		p.setBrush(Qt::white);
-		p.setPen(Qt::NoPen);
-		p.drawEllipse(QRect(QPoint(), size));
-	}
+	auto mask = EllipseMask(size, 1.);
 
 	lock.relock();
 	return Masks.emplace(key, std::move(mask)).first->second;
@@ -329,6 +321,22 @@ std::array<QImage, 4> CornersMask(int radius) {
 	return PrepareCornersMask(radius);
 }
 
+QImage EllipseMask(QSize size, double ratio) {
+	size *= ratio;
+	auto result = QImage(size, QImage::Format_ARGB32_Premultiplied);
+	result.fill(Qt::transparent);
+
+	QPainter p(&result);
+	PainterHighQualityEnabler hq(p);
+	p.setBrush(Qt::white);
+	p.setPen(Qt::NoPen);
+	p.drawEllipse(QRect(QPoint(), size));
+	p.end();
+
+	result.setDevicePixelRatio(ratio);
+	return result;
+}
+
 std::array<QImage, 4> PrepareCorners(
 		int radius,
 		const style::color &color) {
@@ -420,12 +428,12 @@ std::array<QImage, 4> PrepareCorners(
 		return {};
 	}
 	auto result = ReadResult();
+	result.format = reader.format().toLower();
+	result.animated = reader.supportsAnimation()
+		&& (reader.imageCount() > 1);
 	if (!reader.read(&result.image) || result.image.isNull()) {
 		return {};
 	}
-	result.animated = reader.supportsAnimation()
-		&& (reader.imageCount() > 1);
-	result.format = reader.format().toLower();
 	return result;
 }
 
@@ -459,9 +467,7 @@ ReadResult Read(ReadArgs &&args) {
 			Qt::KeepAspectRatio,
 			Qt::SmoothTransformation);
 	}
-	if (args.forceOpaque
-		&& result.format != qstr("jpg")
-		&& result.format != qstr("jpeg")) {
+	if (args.forceOpaque && result.format != qstr("jpeg")) {
 		result.image = Opaque(std::move(result.image));
 	}
 	return result;
@@ -492,7 +498,7 @@ ReadResult Read(ReadArgs &&args) {
 		: Option::None);
 }
 
-QImage Blur(QImage &&image) {
+QImage Blur(QImage &&image, bool ignoreAlpha) {
 	if (image.isNull()) {
 		return std::move(image);
 	}
@@ -518,7 +524,7 @@ QImage Blur(QImage &&image) {
 	if (radius >= 16 || div >= w || div >= h || stride > w * 4) {
 		return std::move(image);
 	}
-	const auto withalpha = image.hasAlphaChannel();
+	const auto withalpha = !ignoreAlpha && image.hasAlphaChannel();
 	if (withalpha) {
 		auto smaller = QImage(image.size(), image.format());
 		{
@@ -973,7 +979,7 @@ QImage Circle(QImage &&image, QRect target) {
 	Expects(!image.isNull());
 
 	if (target.isNull()) {
-		target = QRect(QPoint(), image.size());
+		target = QRect(QPoint( ), image.size());
 	} else {
 		Assert(QRect(QPoint(), image.size()).contains(target));
 	}
@@ -987,8 +993,84 @@ QImage Circle(QImage &&image, QRect target) {
 	p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
 	p.drawImage(
 		QRectF(target.topLeft() / ratio, target.size() / ratio),
-		CircleMask(target.size()));
+		EllipseMaskCached(target.size()));
 	p.end();
+
+	return std::move(image);
+}
+
+QImage Round(
+		QImage &&image,
+		CornersMaskRef mask,
+		QRect target) {
+	if (target.isNull()) {
+		target = QRect(QPoint(), image.size());
+	} else {
+		Assert(QRect(QPoint(), image.size()).contains(target));
+	}
+	const auto targetWidth = target.width();
+	const auto targetHeight = target.height();
+
+	image = std::move(image).convertToFormat(
+		QImage::Format_ARGB32_Premultiplied);
+	Assert(!image.isNull());
+
+	// We need to detach image first (if it is shared), before we
+	// count some offsets using QImage::bytesPerLine etc, because
+	// bytesPerLine may change on detach, this leads to crashes:
+	// Real image bytesPerLine is smaller than the one we use for offsets.
+	auto ints = reinterpret_cast<uint32*>(image.bits());
+
+	constexpr auto kImageIntsPerPixel = 1;
+	const auto imageIntsPerLine = (image.bytesPerLine() >> 2);
+	Assert(image.depth() == ((kImageIntsPerPixel * sizeof(uint32)) << 3));
+	Assert(image.bytesPerLine() == (imageIntsPerLine << 2));
+	const auto maskCorner = [&](
+			const QImage *mask,
+			bool right = false,
+			bool bottom = false) {
+		const auto maskWidth = mask ? mask->width() : 0;
+		const auto maskHeight = mask ? mask->height() : 0;
+		if (!maskWidth
+			|| !maskHeight
+			|| targetWidth < maskWidth
+			|| targetHeight < maskHeight) {
+			return;
+		}
+
+		const auto maskBytesPerPixel = (mask->depth() >> 3);
+		const auto maskBytesPerLine = mask->bytesPerLine();
+		const auto maskBytesAdded = maskBytesPerLine
+			- maskWidth * maskBytesPerPixel;
+		Assert(maskBytesAdded >= 0);
+		Assert(mask->depth() == (maskBytesPerPixel << 3));
+		const auto imageIntsAdded = imageIntsPerLine
+			- maskWidth * kImageIntsPerPixel;
+		Assert(imageIntsAdded >= 0);
+		auto imageInts = ints + target.x() + target.y() * imageIntsPerLine;
+		if (right) {
+			imageInts += targetWidth - maskWidth;
+		}
+		if (bottom) {
+			imageInts += (targetHeight - maskHeight) * imageIntsPerLine;
+		}
+		auto maskBytes = mask->constBits();
+		for (auto y = 0; y != maskHeight; ++y) {
+			for (auto x = 0; x != maskWidth; ++x) {
+				auto opacity = static_cast<anim::ShiftedMultiplier>(*maskBytes) + 1;
+				*imageInts = anim::unshifted(anim::shifted(*imageInts) * opacity);
+				maskBytes += maskBytesPerPixel;
+				imageInts += kImageIntsPerPixel;
+			}
+			maskBytes += maskBytesAdded;
+			imageInts += imageIntsAdded;
+		}
+	};
+
+	maskCorner(mask.p[0]);
+	maskCorner(mask.p[1], true);
+	maskCorner(mask.p[2], false, true);
+	maskCorner(mask.p[3], true, true);
 
 	return std::move(image);
 }
@@ -998,61 +1080,12 @@ QImage Round(
 		gsl::span<const QImage, 4> cornerMasks,
 		RectParts corners,
 		QRect target) {
-	if (target.isNull()) {
-		target = QRect(QPoint(), image.size());
-	} else {
-		Assert(QRect(QPoint(), image.size()).contains(target));
-	}
-	auto cornerWidth = cornerMasks[0].width();
-	auto cornerHeight = cornerMasks[0].height();
-	auto targetWidth = target.width();
-	auto targetHeight = target.height();
-	if (targetWidth < cornerWidth || targetHeight < cornerHeight) {
-		return std::move(image);
-	}
-
-	// We need to detach image first (if it is shared), before we
-	// count some offsets using QImage::bytesPerLine etc, because
-	// bytesPerLine may change on detach, this leads to crashes:
-	// Real image bytesPerLine is smaller than the one we use for offsets.
-	auto ints = reinterpret_cast<uint32*>(image.bits());
-
-	constexpr auto imageIntsPerPixel = 1;
-	auto imageIntsPerLine = (image.bytesPerLine() >> 2);
-	Assert(image.depth() == static_cast<int>((imageIntsPerPixel * sizeof(uint32)) << 3));
-	Assert(image.bytesPerLine() == (imageIntsPerLine << 2));
-	auto intsTopLeft = ints + target.x() + target.y() * imageIntsPerLine;
-	auto intsTopRight = ints + target.x() + targetWidth - cornerWidth + target.y() * imageIntsPerLine;
-	auto intsBottomLeft = ints + target.x() + (target.y() + targetHeight - cornerHeight) * imageIntsPerLine;
-	auto intsBottomRight = ints + target.x() + targetWidth - cornerWidth + (target.y() + targetHeight - cornerHeight) * imageIntsPerLine;
-	auto maskCorner = [&](uint32 *imageInts, const QImage &mask) {
-		auto maskWidth = mask.width();
-		auto maskHeight = mask.height();
-		auto maskBytesPerPixel = (mask.depth() >> 3);
-		auto maskBytesPerLine = mask.bytesPerLine();
-		auto maskBytesAdded = maskBytesPerLine - maskWidth * maskBytesPerPixel;
-		auto maskBytes = mask.constBits();
-		Assert(maskBytesAdded >= 0);
-		Assert(mask.depth() == (maskBytesPerPixel << 3));
-		auto imageIntsAdded = imageIntsPerLine - maskWidth * imageIntsPerPixel;
-		Assert(imageIntsAdded >= 0);
-		for (auto y = 0; y != maskHeight; ++y) {
-			for (auto x = 0; x != maskWidth; ++x) {
-				auto opacity = static_cast<anim::ShiftedMultiplier>(*maskBytes) + 1;
-				*imageInts = anim::unshifted(anim::shifted(*imageInts) * opacity);
-				maskBytes += maskBytesPerPixel;
-				imageInts += imageIntsPerPixel;
-			}
-			maskBytes += maskBytesAdded;
-			imageInts += imageIntsAdded;
-		}
-	};
-	if (corners & RectPart::TopLeft) maskCorner(intsTopLeft, cornerMasks[0]);
-	if (corners & RectPart::TopRight) maskCorner(intsTopRight, cornerMasks[1]);
-	if (corners & RectPart::BottomLeft) maskCorner(intsBottomLeft, cornerMasks[2]);
-	if (corners & RectPart::BottomRight) maskCorner(intsBottomRight, cornerMasks[3]);
-
-	return std::move(image);
+	return Round(std::move(image), CornersMaskRef({
+		(corners & RectPart::TopLeft) ? &cornerMasks[0] : nullptr,
+		(corners & RectPart::TopRight) ? &cornerMasks[1] : nullptr,
+		(corners & RectPart::BottomLeft) ? &cornerMasks[2] : nullptr,
+		(corners & RectPart::BottomRight) ? &cornerMasks[3] : nullptr,
+	}), target);
 }
 
 QImage Round(
@@ -1066,10 +1099,6 @@ QImage Round(
 		Assert((corners & RectPart::AllCorners) == RectPart::AllCorners);
 		return Circle(std::move(image), target);
 	}
-	Assert(!image.isNull());
-
-	image = std::move(image).convertToFormat(
-		QImage::Format_ARGB32_Premultiplied);
 	Assert(!image.isNull());
 
 	const auto masks = CornersMask(radius);
@@ -1110,23 +1139,23 @@ QImage Colored(QImage &&image, QColor add) {
 	}
 
 	if (const auto pix = image.bits()) {
-		const auto ca = int(add.alphaF() * 0xFF);
-		const auto cr = int(add.redF() * 0xFF);
-		const auto cg = int(add.greenF() * 0xFF);
-		const auto cb = int(add .blueF() * 0xFF);
+		const auto ca = add.alpha();
+		const auto cr = add.red() * (ca + 1);
+		const auto cg = add.green() * (ca + 1);
+		const auto cb = add.blue() * (ca + 1);
+		const auto ra = (0x100 - ca) * 0x100;
 		const auto w = image.width();
 		const auto h = image.height();
-		const auto size = w * h * 4;
-		for (auto i = index_type(); i != size; i += 4) {
-			const auto b = pix[i];
-			const auto g = pix[i + 1];
-			const auto r = pix[i + 2];
-			const auto a = pix[i + 3];
-			const auto aca = a * ca;
-			pix[i + 0] = uchar(b + ((aca * (cb - b)) >> 16));
-			pix[i + 1] = uchar(g + ((aca * (cg - g)) >> 16));
-			pix[i + 2] = uchar(r + ((aca * (cr - r)) >> 16));
-			pix[i + 3] = uchar(a + ((aca * (0xFF - a)) >> 16));
+		const auto add = image.bytesPerLine() - (w * 4);
+		auto i = index_type();
+		for (auto y = 0; y != h; ++y) {
+			for (auto to = i + (w * 4); i != to; i += 4) {
+				const auto a = pix[i + 3] + 1;
+				pix[i + 0] = (ra * pix[i + 0] + a * cb) >> 16;
+				pix[i + 1] = (ra * pix[i + 1] + a * cg) >> 16;
+				pix[i + 2] = (ra * pix[i + 2] + a * cr) >> 16;
+			}
+			i += add;
 		}
 	}
 	return std::move(image);
@@ -1219,6 +1248,376 @@ QImage Prepare(QImage image, int w, int h, const PrepareArgs &args) {
 	}
 	image.setDevicePixelRatio(style::DevicePixelRatio());
 	return image;
+}
+
+bool IsProgressiveJpeg(const QByteArray &bytes) {
+	try {
+		struct jpeg_decompress_struct info;
+		struct jpeg_error_mgr jerr;
+
+		info.err = jpeg_std_error(&jerr);
+		jerr.error_exit = [](j_common_ptr cinfo) {
+			(*cinfo->err->output_message)(cinfo);
+			throw std::exception();
+		};
+
+		jpeg_create_decompress(&info);
+		const auto guard = gsl::finally([&] {
+			jpeg_destroy_decompress(&info);
+		});
+
+		jpeg_mem_src(
+			&info,
+			reinterpret_cast<const unsigned char*>(bytes.data()),
+			bytes.size());
+		if (jpeg_read_header(&info, TRUE) != 1) {
+			return false;
+		}
+
+		return (info.progressive_mode > 0);
+	} catch (...) {
+		return false;
+	}
+}
+
+QByteArray MakeProgressiveJpeg(const QByteArray &bytes) {
+	try {
+		struct jpeg_decompress_struct srcinfo;
+		struct jpeg_compress_struct dstinfo;
+		struct jpeg_error_mgr jerr;
+
+		srcinfo.err = jpeg_std_error(&jerr);
+		dstinfo.err = jpeg_std_error(&jerr);
+		jerr.error_exit = [](j_common_ptr cinfo) {
+			(*cinfo->err->output_message)(cinfo);
+			throw std::exception();
+		};
+
+		jpeg_create_decompress(&srcinfo);
+		const auto srcguard = gsl::finally([&] {
+			jpeg_abort_decompress(&srcinfo);
+			jpeg_destroy_decompress(&srcinfo);
+		});
+
+		jpeg_create_compress(&dstinfo);
+		const auto dstguard = gsl::finally([&] {
+			jpeg_abort_compress(&dstinfo);
+			jpeg_destroy_compress(&dstinfo);
+		});
+
+		jpeg_mem_src(
+			&srcinfo,
+			reinterpret_cast<const unsigned char*>(bytes.data()),
+			bytes.size());
+
+		jpeg_save_markers(&srcinfo, JPEG_COM, 0xFFFF);
+		for (int m = 0; m < 16; m++) {
+			jpeg_save_markers(&srcinfo, JPEG_APP0 + m, 0xFFFF);
+		}
+
+		jpeg_read_header(&srcinfo, true);
+		const auto coefArrays = jpeg_read_coefficients(&srcinfo);
+		jpeg_copy_critical_parameters(&srcinfo, &dstinfo);
+		jpeg_simple_progression(&dstinfo);
+
+		unsigned char* outbuffer = nullptr;
+		long unsigned int outsize = 0;
+		jpeg_mem_dest(&dstinfo, &outbuffer, &outsize);
+		const auto outbufferGuard = gsl::finally([&] {
+			free(outbuffer);
+		});
+
+		jpeg_write_coefficients(&dstinfo, coefArrays);
+
+		for (jpeg_saved_marker_ptr marker = srcinfo.marker_list
+			; marker != nullptr
+			; marker = marker->next) {
+			if (dstinfo.write_JFIF_header
+				&& marker->marker == JPEG_APP0
+				&& marker->data_length >= 5
+				&& marker->data[0] == 0x4A
+				&& marker->data[1] == 0x46
+				&& marker->data[2] == 0x49
+				&& marker->data[3] == 0x46
+				&& marker->data[4] == 0)
+				continue; // reject duplicate JFIF
+			if (dstinfo.write_Adobe_marker
+				&& marker->marker == JPEG_APP0 + 14
+				&& marker->data_length >= 5
+				&& marker->data[0] == 0x41
+				&& marker->data[1] == 0x64
+				&& marker->data[2] == 0x6F
+				&& marker->data[3] == 0x62
+				&& marker->data[4] == 0x65)
+				continue; // reject duplicate Adobe
+			jpeg_write_marker(
+				&dstinfo,
+				marker->marker,
+				marker->data,
+				marker->data_length);
+		}
+
+		jpeg_finish_compress(&dstinfo);
+		jpeg_finish_decompress(&srcinfo);
+
+		return QByteArray(reinterpret_cast<char*>(outbuffer), outsize);
+	} catch (...) {
+		return {};
+	}
+}
+
+QByteArray ExpandInlineBytes(const QByteArray &bytes) {
+	if (bytes.size() < 3 || bytes[0] != '\x01') {
+		return QByteArray();
+	}
+	const char header[] = "\xff\xd8\xff\xe0\x00\x10\x4a\x46\x49"
+		"\x46\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00\x43\x00\x28\x1c"
+		"\x1e\x23\x1e\x19\x28\x23\x21\x23\x2d\x2b\x28\x30\x3c\x64\x41\x3c\x37\x37"
+		"\x3c\x7b\x58\x5d\x49\x64\x91\x80\x99\x96\x8f\x80\x8c\x8a\xa0\xb4\xe6\xc3"
+		"\xa0\xaa\xda\xad\x8a\x8c\xc8\xff\xcb\xda\xee\xf5\xff\xff\xff\x9b\xc1\xff"
+		"\xff\xff\xfa\xff\xe6\xfd\xff\xf8\xff\xdb\x00\x43\x01\x2b\x2d\x2d\x3c\x35"
+		"\x3c\x76\x41\x41\x76\xf8\xa5\x8c\xa5\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8"
+		"\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8"
+		"\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8\xf8"
+		"\xf8\xf8\xf8\xf8\xf8\xff\xc0\x00\x11\x08\x00\x00\x00\x00\x03\x01\x22\x00"
+		"\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01"
+		"\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08"
+		"\x09\x0a\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05"
+		"\x04\x04\x00\x00\x01\x7d\x01\x02\x03\x00\x04\x11\x05\x12\x21\x31\x41\x06"
+		"\x13\x51\x61\x07\x22\x71\x14\x32\x81\x91\xa1\x08\x23\x42\xb1\xc1\x15\x52"
+		"\xd1\xf0\x24\x33\x62\x72\x82\x09\x0a\x16\x17\x18\x19\x1a\x25\x26\x27\x28"
+		"\x29\x2a\x34\x35\x36\x37\x38\x39\x3a\x43\x44\x45\x46\x47\x48\x49\x4a\x53"
+		"\x54\x55\x56\x57\x58\x59\x5a\x63\x64\x65\x66\x67\x68\x69\x6a\x73\x74\x75"
+		"\x76\x77\x78\x79\x7a\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96"
+		"\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6"
+		"\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6"
+		"\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4"
+		"\xf5\xf6\xf7\xf8\xf9\xfa\xff\xc4\x00\x1f\x01\x00\x03\x01\x01\x01\x01\x01"
+		"\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08"
+		"\x09\x0a\x0b\xff\xc4\x00\xb5\x11\x00\x02\x01\x02\x04\x04\x03\x04\x07\x05"
+		"\x04\x04\x00\x01\x02\x77\x00\x01\x02\x03\x11\x04\x05\x21\x31\x06\x12\x41"
+		"\x51\x07\x61\x71\x13\x22\x32\x81\x08\x14\x42\x91\xa1\xb1\xc1\x09\x23\x33"
+		"\x52\xf0\x15\x62\x72\xd1\x0a\x16\x24\x34\xe1\x25\xf1\x17\x18\x19\x1a\x26"
+		"\x27\x28\x29\x2a\x35\x36\x37\x38\x39\x3a\x43\x44\x45\x46\x47\x48\x49\x4a"
+		"\x53\x54\x55\x56\x57\x58\x59\x5a\x63\x64\x65\x66\x67\x68\x69\x6a\x73\x74"
+		"\x75\x76\x77\x78\x79\x7a\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94"
+		"\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4"
+		"\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4"
+		"\xd5\xd6\xd7\xd8\xd9\xda\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf2\xf3\xf4"
+		"\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00"
+		"\x3f\x00";
+	const char footer[] = "\xff\xd9";
+	auto real = QByteArray(header, sizeof(header) - 1);
+	real[164] = bytes[1];
+	real[166] = bytes[2];
+	return real
+		+ bytes.mid(3)
+		+ QByteArray::fromRawData(footer, sizeof(footer) - 1);
+}
+
+QImage FromInlineBytes(const QByteArray &bytes) {
+	return Read({ .content = ExpandInlineBytes(bytes) }).image;
+}
+
+// Thanks TDLib for code.
+QByteArray ExpandPathInlineBytes(const QByteArray &bytes) {
+	auto result = QByteArray();
+	result.reserve(3 * (bytes.size() + 1));
+	result.append('M');
+	for (unsigned char c : bytes) {
+		if (c >= 128 + 64) {
+			result.append("AACAAAAHAAALMAAAQASTAVAAAZ"
+				"aacaaaahaaalmaaaqastava.az0123456789-,"[c - 128 - 64]);
+		} else {
+			if (c >= 128) {
+				result.append(',');
+			} else if (c >= 64) {
+				result.append('-');
+			}
+			//char buffer[3] = { 0 }; // Unavailable on macOS < 10.15.
+			//std::to_chars(buffer, buffer + 3, (c & 63));
+			//result.append(buffer);
+			result.append(QByteArray::number(c & 63));
+		}
+	}
+	result.append('z');
+	return result;
+}
+
+QPainterPath PathFromInlineBytes(const QByteArray &bytes) {
+	if (bytes.isEmpty()) {
+		return QPainterPath();
+	}
+	const auto expanded = ExpandPathInlineBytes(bytes);
+	const auto path = expanded.data(); // Allows checking for '\0' by index.
+	auto position = 0;
+
+	const auto isAlpha = [](char c) {
+		c |= 0x20;
+		return 'a' <= c && c <= 'z';
+	};
+	const auto isDigit = [](char c) {
+		return '0' <= c && c <= '9';
+	};
+	const auto skipCommas = [&] {
+		while (path[position] == ',') {
+			++position;
+		}
+	};
+	const auto getNumber = [&] {
+		skipCommas();
+		auto sign = 1;
+		if (path[position] == '-') {
+			sign = -1;
+			++position;
+		}
+		double res = 0;
+		while (isDigit(path[position])) {
+			res = res * 10 + path[position++] - '0';
+		}
+		if (path[position] == '.') {
+			++position;
+			double mul = 0.1;
+			while (isDigit(path[position])) {
+				res += (path[position] - '0') * mul;
+				mul *= 0.1;
+				++position;
+			}
+		}
+		return sign * res;
+	};
+
+	auto result = QPainterPath();
+	auto x = 0.;
+	auto y = 0.;
+	while (path[position] != '\0') {
+		skipCommas();
+		if (path[position] == '\0') {
+			break;
+		}
+
+		while (path[position] == 'm' || path[position] == 'M') {
+			auto command = path[position++];
+			do {
+				if (command == 'm') {
+					x += getNumber();
+					y += getNumber();
+				} else {
+					x = getNumber();
+					y = getNumber();
+				}
+				skipCommas();
+			} while (path[position] != '\0' && !isAlpha(path[position]));
+		}
+
+		auto xStart = x;
+		auto yStart = y;
+		result.moveTo(xStart, yStart);
+		auto haveLastEndControlPoint = false;
+		auto xLastEndControlPoint = 0.;
+		auto yLastEndControlPoint = 0.;
+		auto isClosed = false;
+		auto command = '-';
+		while (!isClosed) {
+			skipCommas();
+			if (path[position] == '\0') {
+				LOG(("SVG Error: Receive unclosed path: %1"
+					).arg(QString::fromLatin1(path)));
+				return QPainterPath();
+			}
+			if (isAlpha(path[position])) {
+				command = path[position++];
+			}
+			switch (command) {
+			case 'l':
+			case 'L':
+			case 'h':
+			case 'H':
+			case 'v':
+			case 'V':
+				if (command == 'l' || command == 'h') {
+					x += getNumber();
+				} else if (command == 'L' || command == 'H') {
+					x = getNumber();
+				}
+				if (command == 'l' || command == 'v') {
+					y += getNumber();
+				} else if (command == 'L' || command == 'V') {
+					y = getNumber();
+				}
+				result.lineTo(x, y);
+				haveLastEndControlPoint = false;
+				break;
+			case 'C':
+			case 'c':
+			case 'S':
+			case 's': {
+				auto xStartControlPoint = 0.;
+				auto yStartControlPoint = 0.;
+				if (command == 'S' || command == 's') {
+					if (haveLastEndControlPoint) {
+						xStartControlPoint = 2 * x - xLastEndControlPoint;
+						yStartControlPoint = 2 * y - yLastEndControlPoint;
+					} else {
+						xStartControlPoint = x;
+						yStartControlPoint = y;
+					}
+				} else {
+					xStartControlPoint = getNumber();
+					yStartControlPoint = getNumber();
+					if (command == 'c') {
+						xStartControlPoint += x;
+						yStartControlPoint += y;
+					}
+				}
+
+				xLastEndControlPoint = getNumber();
+				yLastEndControlPoint = getNumber();
+				if (command == 'c' || command == 's') {
+					xLastEndControlPoint += x;
+					yLastEndControlPoint += y;
+				}
+				haveLastEndControlPoint = true;
+
+				if (command == 'c' || command == 's') {
+					x += getNumber();
+					y += getNumber();
+				} else {
+					x = getNumber();
+					y = getNumber();
+				}
+				result.cubicTo(
+					xStartControlPoint,
+					yStartControlPoint,
+					xLastEndControlPoint,
+					yLastEndControlPoint,
+					x,
+					y);
+				break;
+			}
+			case 'm':
+			case 'M':
+				--position;
+				[[fallthrough]];
+			case 'z':
+			case 'Z':
+				if (x != xStart || y != yStart) {
+					x = xStart;
+					y = yStart;
+					result.lineTo(x, y);
+				}
+				isClosed = true;
+				break;
+			default:
+				LOG(("SVG Error: Receive invalid command %1 at pos %2: %3"
+					).arg(command
+					).arg(position
+					).arg(QString::fromLatin1(path)));
+				return QPainterPath();
+			}
+		}
+	}
+	return result;
 }
 
 } // namespace Images

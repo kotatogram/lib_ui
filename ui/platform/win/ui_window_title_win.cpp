@@ -44,6 +44,20 @@ HRESULT(__stdcall *GetScaleFactorForMonitor)(
 
 } // namespace
 
+namespace internal {
+
+TitleControls::Layout TitleControlsLayout() {
+	return TitleControls::Layout{
+		.right = {
+			TitleControls::Control::Minimize,
+			TitleControls::Control::Maximize,
+			TitleControls::Control::Close,
+		}
+	};
+}
+
+} // namespace internal
+
 struct TitleWidget::PaddingHelper {
 	explicit PaddingHelper(QWidget *parent) : controlsParent(parent) {
 	}
@@ -74,7 +88,7 @@ void TitleWidget::initInWindow(not_null<RpWindow*> window) {
 	) | rpl::filter([=](not_null<HitTestRequest*> request) {
 		return !isHidden() && geometry().contains(request->point);
 	}) | rpl::start_with_next([=](not_null<HitTestRequest*> request) {
-		request->result = hitTest(request->point);
+		request->result = hitTest(request->point, request->result);
 	}, lifetime());
 
 	SetupSemiNativeSystemButtons(&_controls, window, lifetime(), [=] {
@@ -90,7 +104,18 @@ void TitleWidget::setText(const QString &text) {
 
 void TitleWidget::setStyle(const style::WindowTitle &st) {
 	_controls.setStyle(st);
+	if (!st.shadow) {
+		_shadow.destroy();
+	} else if (!_shadow) {
+		_shadow.create(this, st::titleShadow);
+		updateShadowGeometry();
+	}
 	refreshGeometryWithWidth(window()->width());
+}
+
+void TitleWidget::updateShadowGeometry() {
+	const auto thickness = st::lineWidth;
+	_shadow->setGeometry(0, height() - thickness, width(), thickness);
 }
 
 void TitleWidget::refreshGeometryWithWidth(int width) {
@@ -98,9 +123,9 @@ void TitleWidget::refreshGeometryWithWidth(int width) {
 	setGeometry(0, 0, width, _controls.st()->height + add);
 	if (_paddingHelper) {
 		_paddingHelper->controlsParent.setGeometry(
+			0,
 			add,
-			add,
-			width - 2 * add,
+			width,
 			_controls.st()->height);
 	}
 	update();
@@ -122,17 +147,25 @@ void TitleWidget::paintEvent(QPaintEvent *e) {
 }
 
 void TitleWidget::resizeEvent(QResizeEvent *e) {
-	const auto thickness = st::lineWidth;
-	_shadow->setGeometry(0, height() - thickness, width(), thickness);
+	if (_shadow) {
+		updateShadowGeometry();
+	}
 }
 
-HitTestResult TitleWidget::hitTest(QPoint point) const {
+HitTestResult TitleWidget::hitTest(
+		QPoint point,
+		HitTestResult oldResult) const {
 	const auto origin = _paddingHelper
 		? _paddingHelper->controlsParent.pos()
 		: QPoint();
-	const auto controlsResult = _controls.hitTest(point - origin);
+	const auto padding = _paddingHelper
+		? _paddingHelper->padding.current()
+		: 0;
+	const auto controlsResult = _controls.hitTest(point - origin, padding);
 	return (controlsResult != HitTestResult::None)
 		? controlsResult
+		: (oldResult != HitTestResult::Client)
+		? oldResult
 		: HitTestResult::Caption;
 }
 
@@ -202,7 +235,8 @@ void TitleWidget::refreshAdditionalPaddings(
 			return -1;
 		}
 		const auto pixels = (factor + 50) / 100;
-		return int(base::SafeRound(pixels / window()->devicePixelRatioF()));
+		return int(base::SafeRound(
+			pixels / window()->windowHandle()->devicePixelRatio()));
 	}();
 	if (padding < 0) {
 		return;
@@ -221,6 +255,7 @@ rpl::producer<int> TitleWidget::additionalPaddingValue() const {
 void TitleWidget::setAdditionalPadding(int padding) {
 	Expects(_paddingHelper != nullptr);
 
+	padding /= window()->devicePixelRatio();
 	if (_paddingHelper->padding.current() == padding) {
 		return;
 	}

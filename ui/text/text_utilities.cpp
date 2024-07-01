@@ -43,12 +43,25 @@ TextWithEntities Link(const QString &text, const QString &url) {
 }
 
 TextWithEntities Link(const QString &text, int index) {
-	Expects(index > 0 && index < 10);
-	return Link(text, QString("internal:index") + QChar('0' + index));
+	return Link(text, u"internal:index"_q + QChar(index));
 }
 
-TextWithEntities PlainLink(const QString &text) {
-	return WithSingleEntity(text, EntityType::PlainLink);
+TextWithEntities Link(TextWithEntities text, const QString &url) {
+	return Wrapped(std::move(text), EntityType::CustomUrl, url);
+}
+
+TextWithEntities Link(TextWithEntities text, int index) {
+	return Link(std::move(text), u"internal:index"_q + QChar(index));
+}
+
+TextWithEntities Colorized(const QString &text, int index) {
+	const auto data = index ? QString(QChar(index)) : QString();
+	return WithSingleEntity(text, EntityType::Colorized, data);
+}
+
+TextWithEntities Colorized(TextWithEntities text, int index) {
+	const auto data = index ? QString(QChar(index)) : QString();
+	return Wrapped(std::move(text), EntityType::Colorized, data);
 }
 
 TextWithEntities Wrapped(
@@ -91,6 +104,13 @@ TextWithEntities RichLangValue(const QString &text) {
 		offset = till + tag.size();
 	}
 	return result;
+}
+
+TextWithEntities SingleCustomEmoji(QString data) {
+	return {
+		u"@"_q,
+		{ EntityInText(EntityType::CustomEmoji, 0, 1, data) },
+	};
 }
 
 TextWithEntities Mid(const TextWithEntities &text, int position, int n) {

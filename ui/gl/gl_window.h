@@ -6,7 +6,6 @@
 //
 #pragma once
 
-
 namespace Ui {
 class RpWindow;
 class RpWidget;
@@ -15,10 +14,12 @@ class RpWidget;
 namespace Ui::GL {
 
 enum class Backend;
+struct Capabilities;
 
 class Window final {
 public:
 	Window();
+	explicit Window(Fn<Backend(Capabilities)> chooseBackend);
 	~Window();
 
 	[[nodiscard]] Backend backend() const;
@@ -26,8 +27,10 @@ public:
 	[[nodiscard]] not_null<RpWidget*> widget() const;
 
 private:
-	[[nodiscard]] std::unique_ptr<RpWindow> createWindow();
-	[[nodiscard]] std::unique_ptr<RpWidget> createNativeBodyWrap();
+	[[nodiscard]] std::unique_ptr<RpWindow> createWindow(
+		const Fn<Backend(Capabilities)> &chooseBackend);
+	[[nodiscard]] std::unique_ptr<RpWidget> createNativeBodyWrap(
+		const Fn<Backend(Capabilities)> &chooseBackend);
 
 	Backend _backend = Backend();
 	const std::unique_ptr<RpWindow> _window;

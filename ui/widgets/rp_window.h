@@ -11,6 +11,7 @@
 
 namespace style {
 struct WindowTitle;
+struct TextStyle;
 } // namespace style
 
 namespace Ui {
@@ -54,6 +55,8 @@ public:
 		-> rpl::producer<Platform::HitTestResult>;
 	[[nodiscard]] auto systemButtonDown() const
 		-> rpl::producer<Platform::HitTestResult>;
+	void overrideSystemButtonOver(Platform::HitTestResult button);
+	void overrideSystemButtonDown(Platform::HitTestResult button);
 
 	void setTitle(const QString &title);
 	void setTitleStyle(const style::WindowTitle &st);
@@ -65,7 +68,10 @@ public:
 	void showFullScreen();
 	void showNormal();
 	void close();
+	[[nodiscard]] int manualRoundingRadius() const;
 	void setBodyTitleArea(Fn<WindowTitleHitTestFlags(QPoint)> testMethod);
+
+	[[nodiscard]] const style::TextStyle &titleTextStyle() const;
 
 private:
 	const std::unique_ptr<Platform::BasicWindowHelper> _helper;

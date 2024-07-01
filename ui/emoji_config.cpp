@@ -31,7 +31,7 @@ constexpr auto kUniversalSize = 72;
 constexpr auto kImagesPerRow = 32;
 constexpr auto kImageRowsPerSprite = 16;
 
-constexpr auto kSetVersion = uint32(3);
+constexpr auto kSetVersion = uint32(5);
 constexpr auto kCacheVersion = uint32(7);
 constexpr auto kMaxId = uint32(1 << 8);
 
@@ -124,12 +124,9 @@ uint32 ComputeVersion(int id) {
 	static_assert(kCacheVersion > 0 && kCacheVersion < (1 << 16));
 	static_assert(kSetVersion > 0 && kSetVersion < (1 << 8));
 
-	auto result = uint32(kCacheVersion);
-	if (!id) {
-		return result;
-	}
-	result |= (uint32(id) << 24) | (uint32(kSetVersion) << 16);
-	return result;
+	return uint32(kCacheVersion)
+		| (uint32(kSetVersion) << 16)
+		| (uint32(id) << 24);
 }
 
 int ReadCurrentSetId() {
@@ -366,11 +363,31 @@ std::vector<QImage> LoadAndValidateSprites(int id) {
 void ClearUniversalChecked() {
 	Expects(InstanceNormal != nullptr && InstanceLarge != nullptr);
 
-	if (CanClearUniversal
-		&& Universal
+	if (Universal
 		&& InstanceNormal->cached()
 		&& InstanceLarge->cached()) {
-		Universal->clear();
+		if (CanClearUniversal) {
+			Universal->clear();
+		}
+		ClearIrrelevantCache();
+	}
+}
+
+[[nodiscard]] uint8 EmojiSurrogatePairs(const QString &e) {
+	if (e.size() > 1) {
+		auto count = uint8(0);
+		const auto begin = e.data();
+		auto ch = begin;
+		for (const auto end = begin + e.size(); ch != end; ++ch) {
+			if ((ch + 1 < end)
+				&& ch->isHighSurrogate()
+				&& (ch + 1)->isLowSurrogate()) {
+				count++;
+			}
+		}
+		return count;
+	} else {
+		return 0;
 	}
 }
 
@@ -490,8 +507,8 @@ void Init() {
 	const auto persprite = kImagesPerRow * kImageRowsPerSprite;
 	SpritesCount = (count / persprite) + ((count % persprite) ? 1 : 0);
 
-	SizeNormal = style::ConvertScale(18, style::Scale() * style::DevicePixelRatio());
-	SizeLarge = int(style::ConvertScale(18 * 4 / 3., style::Scale() * style::DevicePixelRatio()));
+	SizeNormal = st::emojiSize * style::DevicePixelRatio();
+	SizeLarge = int(style::ConvertScale(18 * 4 / 3., style::Scale())) * style::DevicePixelRatio();
 	Universal = std::make_shared<UniversalImages>(ReadCurrentSetId());
 	CanClearUniversal = false;
 
@@ -627,6 +644,22 @@ int GetSizeTouchbar() {
 		: TouchbarSize;
 }
 #endif
+
+One::One(
+	const QString &id,
+	EmojiPtr original,
+	uint32 index,
+	bool hasPostfix,
+	bool colorizable,
+	const CreationTag &)
+: _id(id)
+, _original(original)
+, _index(index)
+, _hasPostfix(hasPostfix)
+, _colorizable(colorizable)
+, _surrogatePairs(EmojiSurrogatePairs(text())) {
+	Expects(!_colorizable || !colored());
+}
 
 int One::variantsCount() const {
 	return hasVariants() ? 5 : 0;

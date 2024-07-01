@@ -16,7 +16,7 @@ class QPaintEvent;
 namespace Ui {
 namespace Platform {
 
-inline bool TranslucentWindowsSupported(QPoint globalPosition) {
+inline bool TranslucentWindowsSupported() {
 	return true;
 }
 
@@ -32,24 +32,27 @@ inline void ReInitOnTopPanel(not_null<QWidget*> panel) {
 inline void ShowOverAll(not_null<QWidget*> widget, bool canFocus) {
 }
 
-inline void BringToBack(not_null<QWidget*> widget) {
+inline void AcceptAllMouseInput(not_null<QWidget*> widget) {
 }
 
 inline void ClearTransientParent(not_null<QWidget*> widget) {
+}
+
+inline void DisableSystemWindowResize(not_null<QWidget*> widget, QSize ratio) {
 }
 
 inline constexpr bool UseMainQueueGeneric() {
 	return true;
 }
 
-inline bool WindowExtentsSupported() {
+inline bool WindowMarginsSupported() {
 	return false;
 }
 
-inline void SetWindowExtents(QWindow *window, const QMargins &extents) {
+inline void SetWindowMargins(not_null<QWidget*> widget, const QMargins &margins) {
 }
 
-inline void UnsetWindowExtents(QWindow *window) {
+inline void UnsetWindowMargins(not_null<QWidget*> widget) {
 }
 
 } // namespace Platform

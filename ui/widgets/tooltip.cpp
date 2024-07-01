@@ -7,11 +7,15 @@
 #include "ui/widgets/tooltip.h"
 
 #include "ui/ui_utility.h"
+#include "ui/painter.h"
 #include "ui/platform/ui_platform_utility.h"
+#include "ui/widgets/labels.h"
 #include "base/invoke_queued.h"
+#include "base/platform/base_platform_info.h"
 #include "styles/style_widgets.h"
 
 #include <QtGui/QScreen>
+#include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 
 namespace Ui {
@@ -72,8 +76,9 @@ Tooltip::~Tooltip() {
 }
 
 void Tooltip::popup(const QPoint &m, const QString &text, const style::Tooltip *st) {
-	const auto screen = QGuiApplication::screenAt(m);
-	if (!screen) {
+	const auto usingScreenGeometry = !::Platform::IsWayland();
+	const auto screen = usingScreenGeometry ? QGuiApplication::screenAt(m) : nullptr;
+	if (usingScreenGeometry && !screen) {
 		Hide();
 		return;
 	}
@@ -85,9 +90,9 @@ void Tooltip::popup(const QPoint &m, const QString &text, const style::Tooltip *
 
 	_point = m;
 	_st = st;
-	_text = Text::String(_st->textStyle, text, _textPlainOptions, _st->widthMax);
+	_text = Text::String(_st->textStyle, text, kPlainTextOptions, _st->widthMax);
 
-	_useTransparency = Platform::TranslucentWindowsSupported(_point);
+	_useTransparency = Platform::TranslucentWindowsSupported();
 	setAttribute(Qt::WA_OpaquePaintEvent, !_useTransparency);
 
 	int32 addw = 2 * st::lineWidth + _st->textPadding.left() + _st->textPadding.right();
@@ -114,21 +119,26 @@ void Tooltip::popup(const QPoint &m, const QString &text, const style::Tooltip *
 	}
 
 	// adjust tooltip position
-	const auto r = screen->availableGeometry();
-	if (r.x() + r.width() - _st->skip < p.x() + s.width() && p.x() + s.width() > m.x()) {
-		p.setX(qMax(r.x() + r.width() - int32(_st->skip) - s.width(), m.x() - s.width()));
-	}
-	if (r.x() + _st->skip > p.x() && p.x() < m.x()) {
-		p.setX(qMin(m.x(), r.x() + int32(_st->skip)));
-	}
-	if (r.y() + r.height() - _st->skip < p.y() + s.height()) {
-		p.setY(m.y() - s.height() - _st->skip);
-	}
-	if (r.y() > p.x()) {
-		p.setY(qMin(m.y() + _st->shift.y(), r.y() + r.height() - s.height()));
+	if (screen) {
+		createWinId();
+		windowHandle()->setScreen(screen);
+		const auto r = screen->availableGeometry();
+		if (r.x() + r.width() - _st->skip < p.x() + s.width() && p.x() + s.width() > m.x()) {
+			p.setX(qMax(r.x() + r.width() - int32(_st->skip) - s.width(), m.x() - s.width()));
+		}
+		if (r.x() + _st->skip > p.x() && p.x() < m.x()) {
+			p.setX(qMin(m.x(), r.x() + int32(_st->skip)));
+		}
+		if (r.y() + r.height() - _st->skip < p.y() + s.height()) {
+			p.setY(m.y() - s.height() - _st->skip);
+		}
+		if (r.y() > p.x()) {
+			p.setY(qMin(m.y() + _st->shift.y(), r.y() + r.height() - s.height()));
+		}
 	}
 
-	setGeometry(QRect(p, s));
+	move(p);
+	setFixedSize(s);
 
 	_hideByLeaveTimer.cancel();
 	show();
@@ -150,7 +160,8 @@ void Tooltip::paintEvent(QPaintEvent *e) {
 		p.fillRect(QRect(0, st::lineWidth, st::lineWidth, height() - 2 * st::lineWidth), _st->textBorder);
 		p.fillRect(QRect(width() - st::lineWidth, st::lineWidth, st::lineWidth, height() - 2 * st::lineWidth), _st->textBorder);
 	}
-	int32 lines = qFloor((height() - 2 * st::lineWidth - _st->textPadding.top() - _st->textPadding.bottom()) / _st->textStyle.font->height);
+	const auto lines = (height() - 2 * st::lineWidth - _st->textPadding.top() - _st->textPadding.bottom())
+		/ _st->textStyle.font->height;
 
 	p.setPen(_st->textFg);
 	_text.drawElided(p, st::lineWidth + _st->textPadding.left(), st::lineWidth + _st->textPadding.top(), width() - 2 * st::lineWidth - _st->textPadding.left() - _st->textPadding.right(), lines);
@@ -224,7 +235,10 @@ void ImportantTooltip::resizeToContent() {
 	if (size.width() < 2 * (_st.arrowSkipMin + _st.arrow)) {
 		size.setWidth(2 * (_st.arrowSkipMin + _st.arrow));
 	}
-	resize(size);
+	if (_side & RectPart::Right) {
+		size.setWidth(size.width() + _st.arrow);
+	}
+	setFixedSize(size);
 	updateGeometry();
 }
 
@@ -239,9 +253,11 @@ void ImportantTooltip::countApproachSide(RectParts preferSide) {
 	auto allowedBelow = (availableBelow >= requiredSpace + _st.margin.bottom());
 	if ((allowedAbove && allowedBelow) || (!allowedAbove && !allowedBelow)) {
 		_side = preferSide;
+	} else if (preferSide & RectPart::Right) {
+		_side = preferSide;
 	} else {
 		_side = (allowedAbove ? RectPart::Top : RectPart::Bottom)
-			| (preferSide & (RectPart::Left | RectPart::Center | RectPart::Right));
+			| (preferSide & (RectPart::Left | RectPart::Center));
 	}
 	auto arrow = QImage(
 		QSize(_st.arrow * 2, _st.arrow) * style::DevicePixelRatio(),
@@ -261,6 +277,8 @@ void ImportantTooltip::countApproachSide(RectParts preferSide) {
 	}
 	if (_side & RectPart::Bottom) {
 		arrow = std::move(arrow).transformed(QTransform(1, 0, 0, -1, 0, 0));
+	} else if (_side & RectPart::Right) {
+		arrow = std::move(arrow).transformed(QTransform().rotate(-90));
 	}
 	_arrow = PixmapFromImage(std::move(arrow));
 }
@@ -355,11 +373,15 @@ void ImportantTooltip::updateGeometry() {
 	const auto position = _countPosition
 		? _countPosition(size())
 		: countPosition();
+	const auto isTop = (_side & RectPart::Top);
+	const auto isBottom = (_side & RectPart::Bottom);
 	const auto shift = anim::interpolate(
-		(_side & RectPart::Top) ? -_st.shift : _st.shift,
+		(isTop || (_side & RectPart::Left)) ? -_st.shift : _st.shift,
 		0,
 		_visibleAnimation.value(_visible ? 1. : 0.));
-	move(position.x(), position.y() + shift);
+	move(
+		position.x() + (isTop || isBottom ? 0 : shift),
+		position.y() + (isTop || isBottom ? shift : 0));
 }
 
 void ImportantTooltip::resizeEvent(QResizeEvent *e) {
@@ -396,10 +418,70 @@ void ImportantTooltip::paintEvent(QPaintEvent *e) {
 		auto arrowLeft = areaMiddle - _st.arrow;
 		if (_side & RectPart::Top) {
 			p.drawPixmapLeft(arrowLeft, inner.y() + inner.height(), width(), _arrow);
-		} else {
+		} else if (_side & RectPart::Bottom) {
 			p.drawPixmapLeft(arrowLeft, inner.y() - _st.arrow, width(), _arrow);
+		} else if (_side & RectPart::Right) {
+			p.drawPixmapLeft(
+				inner.x() + inner.width(),
+				inner.y() + (inner.height() - _st.arrow) / 2,
+				width(),
+				_arrow);
 		}
 	}
+}
+
+[[nodiscard]] int FindNiceTooltipWidth(
+		int minWidth,
+		int maxWidth,
+		Fn<int(int width)> heightForWidth) {
+	Expects(minWidth >= 0);
+	Expects(maxWidth > minWidth);
+
+	const auto desired = heightForWidth(maxWidth);
+	while (maxWidth - minWidth > 1) {
+		const auto middle = (minWidth + maxWidth) / 2;
+		if (heightForWidth(middle) > desired) {
+			minWidth = middle;
+		} else {
+			maxWidth = middle;
+		}
+	}
+	return maxWidth;
+}
+
+object_ptr<FlatLabel> MakeNiceTooltipLabel(
+		QWidget *parent,
+		rpl::producer<TextWithEntities> &&text,
+		int maxWidth,
+		const style::FlatLabel &st,
+		const style::PopupMenu &stMenu) {
+	Expects(st.minWidth > 0);
+	Expects(st.minWidth < maxWidth);
+
+	auto result = object_ptr<FlatLabel>(
+		parent,
+		rpl::duplicate(text),
+		st,
+		stMenu);
+	const auto raw = result.data();
+	std::move(text) | rpl::start_with_next([=, &st] {
+		raw->resizeToWidth(qMin(maxWidth, raw->textMaxWidth()));
+		const auto desired = raw->textMaxWidth();
+		if (desired <= maxWidth) {
+			raw->resizeToWidth(desired);
+			return;
+		}
+		raw->resizeToWidth(maxWidth);
+		const auto niceWidth = FindNiceTooltipWidth(
+			st.minWidth,
+			maxWidth,
+			[&](int width) {
+				raw->resizeToWidth(width);
+				return raw->heightNoMargins();
+			});
+		raw->resizeToWidth(niceWidth);
+	}, raw->lifetime());
+	return result;
 }
 
 } // namespace Ui

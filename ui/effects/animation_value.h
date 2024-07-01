@@ -14,14 +14,19 @@
 
 namespace anim {
 
-enum class type {
+enum class type : uchar {
 	normal,
 	instant,
 };
 
-enum class activation {
+enum class activation : uchar {
 	normal,
 	background,
+};
+
+enum class repeat : uchar {
+	loop,
+	once,
 };
 
 using transition = Fn<float64(float64 delta, float64 dt)>;
@@ -94,12 +99,12 @@ private:
 
 };
 
-TG_FORCE_INLINE float64 interpolateF(int a, int b, float64 b_ratio) {
+TG_FORCE_INLINE float64 interpolateToF(int a, int b, float64 b_ratio) {
 	return a + float64(b - a) * b_ratio;
 }
 
 TG_FORCE_INLINE int interpolate(int a, int b, float64 b_ratio) {
-	return base::SafeRound(interpolateF(a, b, b_ratio));
+	return base::SafeRound(interpolateToF(a, b, b_ratio));
 }
 
 #ifdef ARCH_CPU_32_BITS
@@ -317,6 +322,11 @@ TG_FORCE_INLINE QBrush brush(style::color a, style::color b, float64 b_ratio) {
 	return (b_ratio > 0) ? ((b_ratio < 1) ? brush(a->c, b->c, b_ratio) : b) : a;
 }
 
+TG_FORCE_INLINE QColor with_alpha(QColor color, float64 alpha) {
+	color.setAlphaF(color.alphaF() * alpha);
+	return color;
+}
+
 template <int N>
 QPainterPath interpolate(QPointF (&from)[N], QPointF (&to)[N], float64 k) {
 	static_assert(N > 1, "Wrong points count in path!");
@@ -357,7 +367,7 @@ void SetSlowMultiplier(int multiplier); // 1 - default, 10 - slow x10.
 void DrawStaticLoading(
 	QPainter &p,
 	QRectF rect,
-	int stroke,
+	float64 stroke,
 	QPen pen,
 	QBrush brush = Qt::NoBrush);
 

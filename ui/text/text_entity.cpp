@@ -10,8 +10,9 @@
 #include "base/qthelp_regex.h"
 #include "base/crc32hash.h"
 #include "ui/text/text.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/emoji_config.h"
+#include "ui/basic_click_handlers.h"
 #include "base/qt/qt_common_adapters.h"
 
 #include <QtCore/QStack>
@@ -1235,6 +1236,11 @@ const QRegularExpression &RegExpBotCommand() {
 	return result;
 }
 
+const QRegularExpression &RegExpDigitsExclude() {
+	static const auto result = QRegularExpression("[^\\d]");
+	return result;
+}
+
 QString MarkdownBoldGoodBefore() {
 	return SeparatorsBold();
 }
@@ -1353,7 +1359,7 @@ QString RemoveAccents(const QString &text) {
 			if (copying) result[i] = *ch;
 			continue;
 		}
-		if (IsDiac(*ch)) {
+		if (IsDiacritic(*ch)) {
 			copying = true;
 			--i;
 			continue;
@@ -1419,7 +1425,11 @@ QStringList PrepareSearchWords(
 }
 
 bool CutPart(TextWithEntities &sending, TextWithEntities &left, int32 limit) {
-	if (left.text.isEmpty() || !limit) return false;
+	Expects(limit > 0);
+
+	if (left.text.isEmpty()) {
+		return false;
+	}
 
 	int32 currentEntity = 0, goodEntity = currentEntity, entityCount = left.entities.size();
 	bool goodInEntity = false, goodCanBreakEntity = false;
@@ -1433,7 +1443,9 @@ bool CutPart(TextWithEntities &sending, TextWithEntities &left, int32 limit) {
 		if (s > half) {
 			bool inEntity = (currentEntity < entityCount) && (ch > start + left.entities[currentEntity].offset()) && (ch < start + left.entities[currentEntity].offset() + left.entities[currentEntity].length());
 			EntityType entityType = (currentEntity < entityCount) ? left.entities[currentEntity].type() : EntityType::Invalid;
-			bool canBreakEntity = (entityType == EntityType::Pre || entityType == EntityType::Code); // #TODO entities
+			bool canBreakEntity = (entityType == EntityType::Pre)
+				|| (entityType == EntityType::Blockquote)
+				|| (entityType == EntityType::Code); // #TODO entities
 			int32 noEntityLevel = inEntity ? 0 : 1;
 
 			auto markGoodAsLevel = [&](int newLevel) {
@@ -1459,9 +1471,15 @@ bool CutPart(TextWithEntities &sending, TextWithEntities &left, int32 limit) {
 						}
 					} else if (ch + 1 < end && IsNewline(*(ch + 1))) {
 						markGoodAsLevel(15);
-					} else if (currentEntity < entityCount && ch + 1 == start + left.entities[currentEntity].offset() && left.entities[currentEntity].type() == EntityType::Pre) {
+					} else if (currentEntity < entityCount
+						&& ch + 1 == start + left.entities[currentEntity].offset()
+						&& (left.entities[currentEntity].type() == EntityType::Pre
+							|| left.entities[currentEntity].type() == EntityType::Blockquote)) {
 						markGoodAsLevel(14);
-					} else if (currentEntity > 0 && ch == start + left.entities[currentEntity - 1].offset() + left.entities[currentEntity - 1].length() && left.entities[currentEntity - 1].type() == EntityType::Pre) {
+					} else if (currentEntity > 0
+						&& ch == start + left.entities[currentEntity - 1].offset() + left.entities[currentEntity - 1].length()
+						&& (left.entities[currentEntity - 1].type() == EntityType::Pre
+							|| left.entities[currentEntity - 1].type() == EntityType::Blockquote)) {
 						markGoodAsLevel(14);
 					} else {
 						markGoodAsLevel(13);
@@ -1520,11 +1538,31 @@ bool CutPart(TextWithEntities &sending, TextWithEntities &left, int32 limit) {
 			return true;
 		}
 	}
-	sending.text = left.text;
-	left.text = QString();
-	sending.entities = left.entities;
-	left.entities = EntitiesInText();
+	sending = base::take(left);
 	return true;
+}
+
+MentionNameFields MentionNameDataToFields(QStringView data) {
+	const auto components = data.split('.');
+	if (components.size() != 2) {
+		return {};
+	}
+	const auto parts = components[1].split(':');
+	if (parts.size() != 2) {
+		return {};
+	}
+	return {
+		.selfId = parts[1].toULongLong(),
+		.userId = components[0].toULongLong(),
+		.accessHash = parts[0].toULongLong(),
+	};
+}
+
+QString MentionNameDataFromFields(const MentionNameFields &fields) {
+	return u"%1.%2:%3"_q
+		.arg(fields.userId)
+		.arg(fields.accessHash)
+		.arg(fields.selfId);
 }
 
 TextWithEntities ParseEntities(const QString &text, int32 flags) {
@@ -1854,7 +1892,7 @@ void Trim(TextWithEntities &result) {
 }
 
 int SerializeTagsSize(const TextWithTags::Tags &tags) {
-	auto result = qint32(0);
+	auto result = int(sizeof(qint32)); // QByteArray size
 	if (tags.isEmpty()) {
 		return result;
 	}
@@ -1929,7 +1967,14 @@ bool IsMentionLink(QStringView link) {
 	return link.startsWith(kMentionTagStart);
 }
 
-[[nodiscard]] bool IsSeparateTag(QStringView tag) {
+QString MentionEntityData(QStringView link) {
+	const auto match = qthelp::regex_match(
+		"^(\\d+\\.\\d+:\\d+)(/|$)",
+		base::StringViewMid(link, kMentionTagStart.size()));
+	return match ? match->captured(1) : QString();
+}
+
+bool IsSeparateTag(QStringView tag) {
 	return (tag == Ui::InputField::kTagCode)
 		|| (tag == Ui::InputField::kTagPre);
 }
@@ -1953,8 +1998,8 @@ QString JoinTag(const QList<QStringView> &list) {
 	return result;
 }
 
-QList<QStringView> SplitTags(const QString &tag) {
-	return QStringView(tag).split(kTagSeparator);
+QList<QStringView> SplitTags(QStringView tag) {
+	return tag.split(kTagSeparator);
 }
 
 QString TagWithRemoved(const QString &tag, const QString &removed) {
@@ -1994,9 +2039,11 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 		EntityType::Spoiler,
 		EntityType::Code,
 		EntityType::Pre,
+		EntityType::Blockquote,
 	};
 	struct State {
 		QString link;
+		QString language;
 		uint32 mask = 0;
 
 		void set(EntityType type) {
@@ -2012,9 +2059,9 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 
 	auto offset = 0;
 	auto state = State();
-	auto notClosedEntities = QVector<int>(); // Stack of indices.
+	auto notClosedEntities = std::vector<int>(); // Stack of indices.
 	const auto closeOne = [&] {
-		Expects(!notClosedEntities.isEmpty());
+		Expects(!notClosedEntities.empty());
 
 		auto &entity = result[notClosedEntities.back()];
 		entity = {
@@ -2052,7 +2099,9 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 	const auto processState = [&](State nextState) {
 		const auto linkChanged = (nextState.link != state.link);
 		if (linkChanged) {
-			if (IsMentionLink(state.link)) {
+			if (Ui::InputField::IsCustomEmojiLink(state.link)) {
+				closeType(EntityType::CustomEmoji);
+			} else if (IsMentionLink(state.link)) {
 				closeType(EntityType::MentionName);
 			} else {
 				closeType(EntityType::CustomUrl);
@@ -2063,42 +2112,58 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 				closeType(type);
 			}
 		}
-		if (linkChanged && !nextState.link.isEmpty()) {
+		const auto openLink = linkChanged && !nextState.link.isEmpty();
+		const auto openCustomEmoji = openLink
+			&& Ui::InputField::IsCustomEmojiLink(nextState.link);
+		if (openLink && !openCustomEmoji) {
 			if (IsMentionLink(nextState.link)) {
-				const auto match = qthelp::regex_match(
-					"^(\\d+\\.\\d+)(/|$)",
-					base::StringViewMid(nextState.link, kMentionTagStart.size()));
-				if (match) {
-					openType(EntityType::MentionName, match->captured(1));
+				const auto data = MentionEntityData(nextState.link);
+				if (!data.isEmpty()) {
+					openType(EntityType::MentionName, data);
 				}
 			} else {
 				openType(EntityType::CustomUrl, nextState.link);
 			}
 		}
-		for (const auto type : kInMaskTypes) {
+		for (const auto type : kInMaskTypes | ranges::views::reverse) {
 			if (nextState.has(type) && !state.has(type)) {
-				openType(type);
+				openType(type, nextState.language);
+			}
+		}
+		if (openCustomEmoji) {
+			const auto data = Ui::InputField::CustomEmojiEntityData(
+				nextState.link);
+			if (!data.isEmpty()) {
+				openType(EntityType::CustomEmoji, data);
 			}
 		}
 		state = nextState;
 	};
 	const auto stateForTag = [&](const QString &tag) {
+		using Tags = Ui::InputField;
 		auto result = State();
 		const auto list = SplitTags(tag);
+		const auto languageStart = Tags::kTagPre.size();
 		for (const auto &single : list) {
-			if (single == Ui::InputField::kTagBold) {
+			if (single == Tags::kTagBold) {
 				result.set(EntityType::Bold);
-			} else if (single == Ui::InputField::kTagItalic) {
+			} else if (single == Tags::kTagItalic) {
 				result.set(EntityType::Italic);
-			} else if (single == Ui::InputField::kTagUnderline) {
+			} else if (single == Tags::kTagUnderline) {
 				result.set(EntityType::Underline);
-			} else if (single == Ui::InputField::kTagStrikeOut) {
+			} else if (single == Tags::kTagStrikeOut) {
 				result.set(EntityType::StrikeOut);
-			} else if (single == Ui::InputField::kTagCode) {
+			} else if (single == Tags::kTagCode) {
 				result.set(EntityType::Code);
-			} else if (single == Ui::InputField::kTagPre) {
+			} else if (single == Tags::kTagPre) {
 				result.set(EntityType::Pre);
-			} else if (single == Ui::InputField::kTagSpoiler) {
+			} else if (single.size() > languageStart
+				&& single.startsWith(Tags::kTagPre)) {
+				result.set(EntityType::Pre);
+				result.language = single.mid(languageStart).toString();
+			} else if (single == Tags::kTagBlockquote) {
+				result.set(EntityType::Blockquote);
+			} else if (single == Tags::kTagSpoiler) {
 				result.set(EntityType::Spoiler);
 			} else {
 				result.link = single.toString();
@@ -2161,9 +2226,10 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 		};
 		switch (entity.type()) {
 		case EntityType::MentionName: {
-			auto match = QRegularExpression(
-				R"(^(\d+\.\d+)$)"
-			).match(entity.data());
+			static const auto RegExp = QRegularExpression(
+				"^(\\d+\\.\\d+:\\d+)$"
+			);
+			const auto match = RegExp.match(entity.data());
 			if (match.hasMatch()) {
 				push(kMentionTagStart + entity.data());
 			}
@@ -2173,6 +2239,13 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 			if (Ui::InputField::IsValidMarkdownLink(url)
 				&& !IsMentionLink(url)) {
 				push(url);
+			}
+		} break;
+		case EntityType::CustomEmoji: {
+			static const auto RegExp = QRegularExpression("^(\\d+)$");
+			const auto match = RegExp.match(entity.data());
+			if (match.hasMatch()) {
+				push(Ui::InputField::CustomEmojiLink(entity.data()));
 			}
 		} break;
 		case EntityType::Bold: push(Ui::InputField::kTagBold); break;
@@ -2186,8 +2259,20 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 		case EntityType::StrikeOut:
 			push(Ui::InputField::kTagStrikeOut);
 			break;
-		case EntityType::Code: push(Ui::InputField::kTagCode); break; // #TODO entities
-		case EntityType::Pre: push(Ui::InputField::kTagPre); break;
+		case EntityType::Code: push(Ui::InputField::kTagCode); break;
+		case EntityType::Pre: {
+			if (!entity.data().isEmpty()) {
+				static const auto Language = QRegularExpression("^[a-z0-9\\-]+$");
+				if (Language.match(entity.data()).hasMatch()) {
+					push(Ui::InputField::kTagPre + entity.data());
+					break;
+				}
+			}
+			push(Ui::InputField::kTagPre);
+		} break;
+		case EntityType::Blockquote:
+			push(Ui::InputField::kTagBlockquote);
+			break;
 		case EntityType::Spoiler: push(Ui::InputField::kTagSpoiler); break;
 		}
 	}
@@ -2217,6 +2302,42 @@ void SetClipboardText(
 }
 
 } // namespace TextUtilities
+
+TextForMimeData TextForMimeData::WithExpandedLinks(
+		const TextWithEntities &text) {
+	auto result = TextForMimeData{ .rich = text };
+	if (!ranges::contains(
+			text.entities,
+			EntityType::CustomUrl,
+			&EntityInText::type)) {
+		result.expanded = text.text;
+	} else {
+		auto from = 0;
+		for (const auto &entity : text.entities) {
+			if (entity.type() != EntityType::CustomUrl) {
+				continue;
+			}
+			// This logic is duplicated in Ui::Text::String::toText.
+			const auto &data = entity.data();
+			if (!data.startsWith(qstr("internal:"))
+				&& (data != UrlClickHandler::EncodeForOpening(
+					text.text.mid(entity.offset(), entity.length())))) {
+				const auto till = entity.offset() + entity.length();
+				if (const auto add = till - from; add > 0) {
+					result.expanded.append(text.text.data() + from, add);
+					from = till;
+				}
+				result.expanded.append(qstr(" (")).append(data).append(')');
+			}
+		}
+		const auto till = text.text.size();
+		if (const auto add = till - from; add > 0) {
+			result.expanded.append(text.text.data() + from, add);
+			from = till;
+		}
+	}
+	return result;
+}
 
 EntityInText::EntityInText(
 	EntityType type,
