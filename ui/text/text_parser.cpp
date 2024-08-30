@@ -78,7 +78,17 @@ constexpr auto kMaxDiacAfterSymbol = 2;
 	const auto &font = st.font;
 	return (font->size() * style::DevicePixelRatio() == 13)
 		&& (font->flags() == 0)
-		&& (font->f.family() == qstr("DAOpenSansRegular"));
+		&& (font->f.family() == qstr("Open Sans"));
+}
+
+[[nodiscard]] bool IsDiacriticAllowedAfter(QChar ch) {
+	const auto code = ch.unicode();
+	const auto category = ch.category();
+	return (code > 32)
+		&& (category != QChar::Other_Control)
+		&& (category != QChar::Other_Format)
+		&& (category != QChar::Other_PrivateUse)
+		&& (category != QChar::Other_NotAssigned);
 }
 
 } // namespace
@@ -567,7 +577,7 @@ void Parser::parseCurrentChar() {
 				createBlock(-_emojiLookback);
 			}
 			_t->_text.push_back(_ch);
-			_allowDiacritic = true;
+			_allowDiacritic = IsDiacriticAllowedAfter(_ch);
 		}
 		if (!isDiacritic) {
 			_diacritics = 0;

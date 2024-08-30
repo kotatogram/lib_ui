@@ -900,12 +900,6 @@ void PopupMenu::deleteOnHide(bool del) {
 }
 
 void PopupMenu::popup(const QPoint &p) {
-	if (_clearLastSeparator) {
-		_menu->clearLastSeparator();
-		for (const auto &[action, submenu] : _submenus) {
-			submenu->menu()->clearLastSeparator();
-		}
-	}
 	if (prepareGeometryFor(p)) {
 		popupPrepared();
 		return;
@@ -957,10 +951,15 @@ bool PopupMenu::prepareGeometryFor(const QPoint &p) {
 }
 
 bool PopupMenu::prepareGeometryFor(const QPoint &p, PopupMenu *parent) {
+	if (_clearLastSeparator) {
+		_menu->clearLastSeparator();
+		for (const auto &[action, submenu] : _submenus) {
+			submenu->menu()->clearLastSeparator();
+		}
+	}
+
 	const auto usingScreenGeometry = !::Platform::IsWayland();
-	const auto screen = usingScreenGeometry
-		? QGuiApplication::screenAt(p)
-		: nullptr;
+	const auto screen = QGuiApplication::screenAt(p);
 	if ((usingScreenGeometry && !screen)
 		|| (!parent
 			&& ::Platform::IsMac()
@@ -1002,7 +1001,7 @@ bool PopupMenu::prepareGeometryFor(const QPoint &p, PopupMenu *parent) {
 			_additionalMenuPadding.left() - _st.shadow.extend.left(),
 			0),
 		_padding.top() - _topShift);
-	auto r = screen ? screen->availableGeometry() : QRect();
+	auto r = usingScreenGeometry ? screen->availableGeometry() : QRect();
 	const auto parentWidth = _parent ? _parent->inner().width() : 0;
 	if (style::RightToLeft()) {
 		const auto badLeft = !r.isNull() && w.x() - width() < r.x() - _margins.left();

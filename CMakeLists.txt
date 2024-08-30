@@ -139,8 +139,6 @@ PRIVATE
     ui/style/style_core.h
     ui/style/style_core_color.cpp
     ui/style/style_core_color.h
-    ui/style/style_core_custom_font.cpp
-    ui/style/style_core_custom_font.h
     ui/style/style_core_direction.cpp
     ui/style/style_core_direction.h
     ui/style/style_core_font.cpp
@@ -263,6 +261,7 @@ PRIVATE
     ui/abstract_button.h
     ui/animated_icon.cpp
     ui/animated_icon.h
+    ui/arc_angles.h
     ui/basic_click_handlers.cpp
     ui/basic_click_handlers.h
     ui/cached_special_layer_shadow_corners.cpp

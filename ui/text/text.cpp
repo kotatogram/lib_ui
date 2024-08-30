@@ -984,6 +984,8 @@ void String::enumerateLines(
 				return withElided(true);
 			}
 			lineHeight = 0;
+			last_rBearing = 0;// b->f_rbearing(); (0 for newline)
+			last_rPadding = 0;// b->f_rpadding(); (0 for newline)
 
 			initNextParagraph(i + 1, index);
 			longWordLine = true;
@@ -1810,8 +1812,7 @@ bool IsSpace(QChar ch) {
 		|| (ch == QChar::LineSeparator)
 		|| (ch == QChar::ObjectReplacementCharacter)
 		|| (ch == QChar::CarriageReturn)
-		|| (ch == QChar::Tabulation)
-		|| (ch == QChar(8203)/*Zero width space.*/);
+		|| (ch == QChar::Tabulation);
 }
 
 bool IsDiacritic(QChar ch) { // diacritic and variation selectors
@@ -1821,6 +1822,9 @@ bool IsDiacritic(QChar ch) { // diacritic and variation selectors
 }
 
 bool IsReplacedBySpace(QChar ch) {
+	// Those symbols are replaced by space on the Telegram server,
+	// so we replace them as well, for sent / received consistency.
+	//
 	// \xe2\x80[\xa8 - \xac\xad] // 8232 - 8237
 	// QString from1 = QString::fromUtf8("\xe2\x80\xa8"), to1 = QString::fromUtf8("\xe2\x80\xad");
 	// \xcc[\xb3\xbf\x8a] // 819, 831, 778
@@ -1836,7 +1840,9 @@ bool IsReplacedBySpace(QChar ch) {
 }
 
 bool IsTrimmed(QChar ch) {
-	return (IsSpace(ch) || IsBad(ch));
+	return IsSpace(ch)
+		|| IsBad(ch)
+		|| (ch == QChar(8203)); // zero width space
 }
 
 } // namespace Ui::Text

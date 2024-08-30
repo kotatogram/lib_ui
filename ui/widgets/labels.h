@@ -117,6 +117,10 @@ public:
 		const style::FlatLabel &st = st::defaultFlatLabel,
 		const style::PopupMenu &stMenu = st::defaultPopupMenu);
 
+	[[nodiscard]] const style::FlatLabel &st() const {
+		return _st;
+	}
+
 	void setOpacity(float64 o);
 	void setTextColorOverride(std::optional<QColor> color);
 
@@ -154,7 +158,7 @@ public:
 	struct ContextMenuRequest {
 		not_null<PopupMenu*> menu;
 		ClickHandlerPtr link;
-		bool hasSelection = false;
+		TextSelection selection;
 		bool uponSelection = false;
 		bool fullSelection = false;
 	};

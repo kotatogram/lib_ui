@@ -20,10 +20,13 @@ namespace Ui {
 
 // flick scroll taken from http://qt-project.org/doc/qt-4.8/demos-embedded-anomaly-src-flickcharm-cpp.html
 
-ScrollShadow::ScrollShadow(ScrollArea *parent, const style::ScrollArea *st) : QWidget(parent), _st(st) {
+ScrollShadow::ScrollShadow(ScrollArea *parent, const style::ScrollArea *st)
+: QWidget(parent)
+, _st(st) {
+	Expects(_st != nullptr);
+	Expects(_st->shColor.get() != nullptr);
+
 	setVisible(false);
-	Assert(_st != nullptr);
-	Assert(_st->shColor.v() != nullptr);
 }
 
 void ScrollShadow::paintEvent(QPaintEvent *e) {
@@ -706,32 +709,48 @@ void ScrollArea::scrollToWidget(not_null<QWidget*> widget) {
 	}
 }
 
-void ScrollArea::scrollToY(int toTop, int toBottom) {
+int ScrollArea::computeScrollTo(int toTop, int toBottom) {
 	if (const auto inner = widget()) {
 		SendPendingMoveResizeEvents(inner);
 	}
 	SendPendingMoveResizeEvents(this);
 
-	int toMin = 0, toMax = scrollTopMax();
+	const auto toMin = 0;
+	const auto toMax = scrollTopMax();
 	if (toTop < toMin) {
 		toTop = toMin;
 	} else if (toTop > toMax) {
 		toTop = toMax;
 	}
-	bool exact = (toBottom < 0);
+	const auto exact = (toBottom < 0);
 
-	int curTop = scrollTop(), curHeight = height(), curBottom = curTop + curHeight, scToTop = toTop;
+	const auto curTop = scrollTop();
+	const auto curHeight = height();
+	const auto curBottom = curTop + curHeight;
+	auto scToTop = toTop;
 	if (!exact && toTop >= curTop) {
-		if (toBottom < toTop) toBottom = toTop;
-		if (toBottom <= curBottom) return;
+		if (toBottom < toTop) {
+			toBottom = toTop;
+		}
+		if (toBottom <= curBottom) {
+			return curTop;
+		}
 
 		scToTop = toBottom - curHeight;
-		if (scToTop > toTop) scToTop = toTop;
-		if (scToTop == curTop) return;
+		if (scToTop > toTop) {
+			scToTop = toTop;
+		}
+		if (scToTop == curTop) {
+			return curTop;
+		}
 	} else {
 		scToTop = toTop;
 	}
-	verticalScrollBar()->setValue(scToTop);
+	return scToTop;
+}
+
+void ScrollArea::scrollToY(int toTop, int toBottom) {
+	verticalScrollBar()->setValue(computeScrollTo(toTop, toBottom));
 }
 
 void ScrollArea::doSetOwnedWidget(object_ptr<QWidget> w) {
