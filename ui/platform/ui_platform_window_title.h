@@ -116,7 +116,7 @@ public:
 	void setResizeEnabled(bool enabled);
 	void raise();
 
-	[[nodiscard]] HitTestResult hitTest(QPoint point, int padding) const;
+	[[nodiscard]] HitTestResult hitTest(QPoint point) const;
 
 	void buttonOver(HitTestResult testResult);
 	void buttonDown(HitTestResult testResult);
@@ -133,13 +133,9 @@ private:
 	[[nodiscard]] AbstractButton *controlWidget(Control control) const;
 
 	void init(Fn<void(bool maximized)> maximize);
-	void subscribeToStateChanges();
 	void updateButtonsState();
 	void updateControlsPosition();
-	void updateControlsPositionBySide(
-		const std::vector<Control> &controls,
-		bool right);
-	void handleWindowStateChanged(Qt::WindowState state = Qt::WindowNoState);
+	void handleWindowStateChanged(Qt::WindowStates state = Qt::WindowNoState);
 
 	not_null<const style::WindowTitle*> _st;
 	const std::unique_ptr<AbstractTitleButtons> _buttons;
@@ -159,7 +155,7 @@ namespace internal {
 // Actual requestor, cached by the public interface
 [[nodiscard]] TitleControls::Layout TitleControlsLayout();
 void NotifyTitleControlsLayoutChanged(
-    const std::optional<TitleControls::Layout> &layout = std::nullopt);
+	const std::optional<TitleControls::Layout> &layout = std::nullopt);
 
 } // namespace internal
 

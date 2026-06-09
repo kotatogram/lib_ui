@@ -8,6 +8,7 @@
 
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
+#include "ui/qt_weak_factory.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt/qt_common_adapters.h"
 #include "styles/style_widgets.h"
@@ -48,23 +49,6 @@ constexpr auto kLogB = 10.;
 	//const auto result = pow(value, 1. / kOverscrollPower);
 
 	return result * scale;
-}
-
-[[nodiscard]] int OverscrollFromAccumulated(int accumulated) {
-	if (!accumulated) {
-		return 0;
-	}
-
-	return (accumulated > 0 ? 1. : -1.)
-		* int(base::SafeRound(RawFrom(std::abs(accumulated))));
-}
-
-[[nodiscard]] int OverscrollToAccumulated(int overscroll) {
-	if (!overscroll) {
-		return 0;
-	}
-	return (overscroll > 0 ? 1. : -1.)
-		* int(base::SafeRound(RawTo(std::abs(overscroll))));
 }
 
 } // namespace
@@ -772,7 +756,8 @@ bool ElasticScroll::filterOutTouchEvent(QEvent *e) {
 		|| type == QEvent::TouchEnd
 		|| type == QEvent::TouchCancel) {
 		const auto ev = static_cast<QTouchEvent*>(e);
-		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
+		if ((ev->type() == QEvent::TouchCancel && !ev->device())
+			|| (ev->device()->type() == base::TouchDevice::TouchScreen)) {
 			if (_customTouchProcess && _customTouchProcess(ev)) {
 				return true;
 			} else if (!_touchDisabled) {
@@ -1070,11 +1055,25 @@ void ElasticScroll::moveEvent(QMoveEvent *e) {
 }
 
 void ElasticScroll::keyPressEvent(QKeyEvent *e) {
-	if ((e->key() == Qt::Key_Up || e->key() == Qt::Key_Down)
-		&& e->modifiers().testFlag(Qt::AltModifier)) {
+	const auto key = e->key();
+	if (!_widget) {
 		e->ignore();
-	} else if (_widget && (e->key() == Qt::Key_Escape || e->key() == Qt::Key_Back)) {
+		return;
+	} else if ((key == Qt::Key_Up || key == Qt::Key_Down)
+		&& (e->modifiers().testFlag(Qt::AltModifier)
+			|| e->modifiers().testFlag(Qt::ControlModifier))) {
+		e->ignore();
+	} else if (_widget && (key == Qt::Key_Escape || key == Qt::Key_Back)) {
 		((QObject*)_widget.data())->event(e);
+	} else if (key == Qt::Key_Up
+		|| key == Qt::Key_Down
+		|| key == Qt::Key_PageUp
+		|| key == Qt::Key_PageDown) {
+		const auto up = (key == Qt::Key_Up) || (key == Qt::Key_PageUp);
+		const auto step = (key == Qt::Key_Up || key == Qt::Key_Down)
+			? style::ConvertScale(20)
+			: height();
+		tryScrollTo(_state.visibleFrom + (up ? -step : step));
 	}
 }
 
@@ -1289,11 +1288,28 @@ rpl::producer<ElasticScrollMovement> ElasticScroll::movementValue() const {
 	return _movement.value();
 }
 
-QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch) {
-	const auto convert = [](QPoint point) {
-		return QPoint(
-			style::ConvertScale(point.x()),
-			style::ConvertScale(point.y()));
+int OverscrollFromAccumulated(int accumulated) {
+	if (!accumulated) {
+		return 0;
+	}
+
+	return (accumulated > 0 ? 1. : -1.)
+		* int(base::SafeRound(RawFrom(std::abs(accumulated))));
+}
+
+int OverscrollToAccumulated(int overscroll) {
+	if (!overscroll) {
+		return 0;
+	}
+	return (overscroll > 0 ? 1. : -1.)
+		* int(base::SafeRound(RawTo(std::abs(overscroll))));
+}
+
+QPointF ScrollDeltaF(not_null<QWheelEvent*> e, bool touch) {
+	const auto convert = [](QPointF point) {
+		return QPointF(
+			style::ConvertScaleExact(point.x()),
+			style::ConvertScaleExact(point.y()));
 	};
 	if (!e->pixelDelta().isNull()) {
 		return convert(e->pixelDelta())
@@ -1302,7 +1318,11 @@ QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch) {
 				: 1.);
 	}
 	return (convert(e->angleDelta()) * QApplication::wheelScrollLines())
-		/ (kPixelToAngleDelta * kDefaultWheelScrollLines);
+		/ float64(kPixelToAngleDelta * kDefaultWheelScrollLines);
+}
+
+QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch) {
+	return ScrollDeltaF(e, touch).toPoint();
 }
 
 } // namespace Ui

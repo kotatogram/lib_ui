@@ -13,6 +13,7 @@
 #include "ui/widgets/fields/input_field.h"
 #include "ui/emoji_config.h"
 #include "ui/basic_click_handlers.h"
+#include "ui/integration.h"
 #include "base/qt/qt_common_adapters.h"
 
 #include <QtCore/QStack>
@@ -77,6 +78,10 @@ QString SeparatorsSpoiler() {
 
 QString ExpressionHashtag() {
 	return QString::fromUtf8("(^|[") + ExpressionSeparators(QString::fromUtf8("`\\*/")) + QString::fromUtf8("])#[\\w]{2,64}([\\W]|$)");
+}
+
+QString ExpressionHashtagMention() {
+	return QString::fromUtf8("(^|[") + ExpressionSeparators(QString::fromUtf8("`\\*/")) + QString::fromUtf8("])#[\\w]{2,64}(@[A-Za-z_0-9]{1,32})?([\\W]|$)");
 }
 
 QString ExpressionHashtagExclude() {
@@ -1216,9 +1221,14 @@ const QRegularExpression &RegExpMailNameAtEnd() {
 	return result;
 }
 
-const QRegularExpression &RegExpHashtag() {
-	static const auto result = CreateRegExp(ExpressionHashtag());
-	return result;
+const QRegularExpression &RegExpHashtag(bool allowWithMention) {
+	if (allowWithMention) {
+		static const auto result = CreateRegExp(ExpressionHashtagMention());
+		return result;
+	} else {
+		static const auto result = CreateRegExp(ExpressionHashtag());
+		return result;
+	}
 }
 
 const QRegularExpression &RegExpHashtagExclude() {
@@ -1589,7 +1599,7 @@ void ParseEntities(TextWithEntities &result, int32 flags) {
 	for (int32 offset = 0, matchOffset = offset, mentionSkip = 0; offset < len;) {
 		auto mDomain = qthelp::RegExpDomain().match(result.text, matchOffset);
 		auto mExplicitDomain = qthelp::RegExpDomainExplicit().match(result.text, matchOffset);
-		auto mHashtag = withHashtags ? RegExpHashtag().match(result.text, matchOffset) : QRegularExpressionMatch();
+		auto mHashtag = withHashtags ? RegExpHashtag(true).match(result.text, matchOffset) : QRegularExpressionMatch();
 		auto mMention = withMentions ? RegExpMention().match(result.text, qMax(mentionSkip, matchOffset)) : QRegularExpressionMatch();
 		auto mBotCommand = withBotCommands ? RegExpBotCommand().match(result.text, matchOffset) : QRegularExpressionMatch();
 
@@ -1612,7 +1622,7 @@ void ParseEntities(TextWithEntities &result, int32 flags) {
 			if (!mHashtag.capturedView(1).isEmpty()) {
 				++hashtagStart;
 			}
-			if (!mHashtag.capturedView(2).isEmpty()) {
+			if (!mHashtag.capturedView(3).isEmpty()) {
 				--hashtagEnd;
 			}
 			if (RegExpHashtagExclude().match(
@@ -2025,26 +2035,52 @@ QString TagWithAdded(const QString &tag, const QString &added) {
 	return JoinTag(list);
 }
 
+TextWithTags::Tags SimplifyTags(TextWithTags::Tags tags) {
+	for (auto i = tags.begin(); i != tags.end();) {
+		const auto j = i + 1;
+		if (j == tags.end()) {
+			break;
+		} else if (j->offset > i->offset + i->length) {
+			++i;
+			continue;
+		}
+		auto il = SplitTags(i->id);
+		std::sort(il.begin(), il.end());
+		auto jl = SplitTags(j->id);
+		std::sort(jl.begin(), jl.end());
+		if (JoinTag(il) == JoinTag(jl)) {
+			i->length = j->offset + j->length - i->offset;
+			i = tags.erase(j) - 1;
+		} else {
+			++i;
+		}
+	}
+	return tags;
+}
+
 EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 	auto result = EntitiesInText();
 	if (tags.isEmpty()) {
 		return result;
 	}
 
-	constexpr auto kInMaskTypes = std::array{
+	constexpr auto kInMaskTypesInline = std::array{
 		EntityType::Bold,
 		EntityType::Italic,
 		EntityType::Underline,
 		EntityType::StrikeOut,
 		EntityType::Spoiler,
 		EntityType::Code,
+	};
+	constexpr auto kInMaskTypesBlock = std::array{
 		EntityType::Pre,
 		EntityType::Blockquote,
 	};
 	struct State {
 		QString link;
 		QString language;
-		uint32 mask = 0;
+		uint32 mask : 31 = 0;
+		uint32 collapsed : 1 = 0;
 
 		void set(EntityType type) {
 			mask |= (1 << int(type));
@@ -2064,13 +2100,15 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 		Expects(!notClosedEntities.empty());
 
 		auto &entity = result[notClosedEntities.back()];
+		const auto type = entity.type();
 		entity = {
-			entity.type(),
+			type,
 			entity.offset(),
 			offset - entity.offset(),
 			entity.data(),
 		};
-		if (ranges::contains(kInMaskTypes, entity.type())) {
+		if (ranges::contains(kInMaskTypesInline, type)
+			|| ranges::contains(kInMaskTypesBlock, type)) {
 			state.remove(entity.type());
 		} else {
 			state.link = QString();
@@ -2098,23 +2136,42 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 
 	const auto processState = [&](State nextState) {
 		const auto linkChanged = (nextState.link != state.link);
-		if (linkChanged) {
-			if (Ui::InputField::IsCustomEmojiLink(state.link)) {
-				closeType(EntityType::CustomEmoji);
-			} else if (IsMentionLink(state.link)) {
+		const auto closeLink = linkChanged && !state.link.isEmpty();
+		const auto closeCustomEmoji = closeLink
+			&& Ui::InputField::IsCustomEmojiLink(state.link);
+		if (closeCustomEmoji) {
+			closeType(EntityType::CustomEmoji);
+		}
+		for (const auto type : kInMaskTypesInline) {
+			if (state.has(type) && !nextState.has(type)) {
+				closeType(type);
+			}
+		}
+		if (closeLink && !closeCustomEmoji) {
+			if (IsMentionLink(state.link)) {
 				closeType(EntityType::MentionName);
 			} else {
 				closeType(EntityType::CustomUrl);
 			}
 		}
-		for (const auto type : kInMaskTypes) {
+		for (const auto type : kInMaskTypesBlock) {
 			if (state.has(type) && !nextState.has(type)) {
 				closeType(type);
 			}
 		}
+
 		const auto openLink = linkChanged && !nextState.link.isEmpty();
 		const auto openCustomEmoji = openLink
 			&& Ui::InputField::IsCustomEmojiLink(nextState.link);
+		for (const auto type : kInMaskTypesBlock | ranges::views::reverse) {
+			if (nextState.has(type) && !state.has(type)) {
+				openType(type, (type == EntityType::Pre)
+					? nextState.language
+					: (type == EntityType::Blockquote && nextState.collapsed)
+					? u"1"_q
+					: QString());
+			}
+		}
 		if (openLink && !openCustomEmoji) {
 			if (IsMentionLink(nextState.link)) {
 				const auto data = MentionEntityData(nextState.link);
@@ -2125,9 +2182,9 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 				openType(EntityType::CustomUrl, nextState.link);
 			}
 		}
-		for (const auto type : kInMaskTypes | ranges::views::reverse) {
+		for (const auto type : kInMaskTypesInline | ranges::views::reverse) {
 			if (nextState.has(type) && !state.has(type)) {
-				openType(type, nextState.language);
+				openType(type);
 			}
 		}
 		if (openCustomEmoji) {
@@ -2163,6 +2220,10 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 				result.language = single.mid(languageStart).toString();
 			} else if (single == Tags::kTagBlockquote) {
 				result.set(EntityType::Blockquote);
+				result.collapsed = 0;
+			} else if (single == Tags::kTagBlockquoteCollapsed) {
+				result.set(EntityType::Blockquote);
+				result.collapsed = 1;
 			} else if (single == Tags::kTagSpoiler) {
 				result.set(EntityType::Spoiler);
 			} else {
@@ -2262,7 +2323,7 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 		case EntityType::Code: push(Ui::InputField::kTagCode); break;
 		case EntityType::Pre: {
 			if (!entity.data().isEmpty()) {
-				static const auto Language = QRegularExpression("^[a-z0-9\\-]+$");
+				static const auto Language = QRegularExpression("^[a-zA-Z0-9\\-\\+]+$");
 				if (Language.match(entity.data()).hasMatch()) {
 					push(Ui::InputField::kTagPre + entity.data());
 					break;
@@ -2271,7 +2332,9 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 			push(Ui::InputField::kTagPre);
 		} break;
 		case EntityType::Blockquote:
-			push(Ui::InputField::kTagBlockquote);
+			push(entity.data().isEmpty()
+				? Ui::InputField::kTagBlockquote
+				: Ui::InputField::kTagBlockquoteCollapsed);
 			break;
 		case EntityType::Spoiler: push(Ui::InputField::kTagSpoiler); break;
 		}

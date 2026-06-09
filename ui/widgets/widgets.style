@@ -97,7 +97,7 @@ RoundButton {
 	iconOver: icon;
 	iconPosition: point;
 
-	font: font;
+	style: TextStyle;
 
 	ripple: RippleAnimation;
 }
@@ -287,12 +287,13 @@ InputField {
 	borderRadius: pixels;
 	borderDenominator: int;
 
-	font: font;
+	style: TextStyle;
 	menu: PopupMenu;
 
 	width: pixels;
 	heightMin: pixels;
 	heightMax: pixels;
+	widthMin: pixels;
 }
 
 OutlineButton {
@@ -464,6 +465,8 @@ CallButton {
 	outerRadius: pixels;
 	outerBg: color;
 	label: FlatLabel;
+	cornerButtonPosition: point;
+	cornerButtonBorder: pixels;
 }
 
 InnerDropdown {
@@ -559,6 +562,7 @@ WindowTitle {
 	fg: color;
 	fgActive: color;
 	shadow: bool;
+	oneSideControls: bool;
 	style: TextStyle;
 	minimize: IconButton;
 	minimizeIconActive: icon;
@@ -683,7 +687,7 @@ defaultActiveButton: RoundButton {
 
 	iconPosition: point(0px, 0px);
 
-	font: semiboldFont;
+	style: semiboldTextStyle;
 
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: activeButtonBgRipple;
@@ -878,6 +882,10 @@ defaultPopupMenu: PopupMenu {
 	showDuration: 200;
 }
 
+boxTextStyle: TextStyle(defaultTextStyle) {
+	font: font(boxFontSize);
+}
+
 defaultInputField: InputField {
 	textBg: windowBg;
 	textBgActive: windowBg;
@@ -904,11 +912,12 @@ defaultInputField: InputField {
 	borderRadius: 0px;
 	borderDenominator: 1;
 
-	font: boxTextFont;
+	style: boxTextStyle;
 	menu: defaultPopupMenu;
 
 	heightMin: 55px;
 	heightMax: 148px;
+	widthMin: 64px;
 }
 defaultInputFieldLimit: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
@@ -954,7 +963,7 @@ defaultMultiSelectSearchField: InputField(defaultInputField) {
 
 	heightMin: 32px;
 
-	font: normalFont;
+	style: defaultTextStyle;
 }
 
 boxFieldSearchIcon: icon {{ "box_search", menuIconFg, point(10px, 9px) }};
@@ -1270,10 +1279,6 @@ defaultPeerListItem: PeerListItem {
 	statusFgActive: windowActiveTextFg;
 }
 
-boxTextStyle: TextStyle(defaultTextStyle) {
-	font: font(boxFontSize);
-}
-
 defaultPeerListAbout: FlatLabel(defaultFlatLabel) {
 	minWidth: 240px;
 	textFg: membersAboutLimitFg;
@@ -1394,12 +1399,13 @@ defaultSideBarButton: SideBarButton {
 	}
 }
 
+defaultToastPalette: TextPalette(defaultTextPalette) {
+	linkFg: mediaviewTextLinkFg;
+	monoFg: mediaviewCaptionFg;
+}
 defaultToast: Toast {
 	style: defaultTextStyle;
-	palette: TextPalette(defaultTextPalette) {
-		linkFg: mediaviewTextLinkFg;
-		monoFg: mediaviewCaptionFg;
-	}
+	palette: defaultToastPalette;
 	padding: margins(19px, 13px, 19px, 12px);
 	margin: margins(13px, 13px, 13px, 13px);
 	maxWidth: 480px;
@@ -1437,6 +1443,7 @@ defaultWindowTitle: WindowTitle {
 		font: font(semibold 12px);
 	}
 	shadow: true;
+	oneSideControls: false;
 	minimize: IconButton(windowTitleButton) {
 		icon: icon {
 			{ windowTitleButtonSize, titleButtonBg },

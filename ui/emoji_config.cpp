@@ -12,6 +12,7 @@
 #include "base/parse_helper.h"
 #include "base/debug_log.h"
 #include "ui/style/style_core.h"
+#include "ui/integration.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "styles/style_basic.h"
@@ -31,8 +32,8 @@ constexpr auto kUniversalSize = 72;
 constexpr auto kImagesPerRow = 32;
 constexpr auto kImageRowsPerSprite = 16;
 
-constexpr auto kSetVersion = uint32(5);
-constexpr auto kCacheVersion = uint32(7);
+constexpr auto kSetVersion = uint32(6);
+constexpr auto kCacheVersion = uint32(8);
 constexpr auto kMaxId = uint32(1 << 8);
 
 #ifdef Q_OS_MAC
@@ -373,24 +374,6 @@ void ClearUniversalChecked() {
 	}
 }
 
-[[nodiscard]] uint8 EmojiSurrogatePairs(const QString &e) {
-	if (e.size() > 1) {
-		auto count = uint8(0);
-		const auto begin = e.data();
-		auto ch = begin;
-		for (const auto end = begin + e.size(); ch != end; ++ch) {
-			if ((ch + 1 < end)
-				&& ch->isHighSurrogate()
-				&& (ch + 1)->isLowSurrogate()) {
-				count++;
-			}
-		}
-		return count;
-	} else {
-		return 0;
-	}
-}
-
 } // namespace
 
 namespace internal {
@@ -656,8 +639,7 @@ One::One(
 , _original(original)
 , _index(index)
 , _hasPostfix(hasPostfix)
-, _colorizable(colorizable)
-, _surrogatePairs(EmojiSurrogatePairs(text())) {
+, _colorizable(colorizable) {
 	Expects(!_colorizable || !colored());
 }
 

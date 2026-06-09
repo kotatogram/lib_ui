@@ -12,8 +12,8 @@
 #include "styles/style_widgets.h"
 
 #include <QtGui/QPainter>
+#include <QtGui/QScreen>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QDesktopWidget>
 
 #include <windowsx.h>
 
@@ -42,9 +42,15 @@ base::flat_map<HWND, not_null<WindowShadow*>> ShadowByHandle;
 } // namespace
 
 WindowShadow::WindowShadow(not_null<RpWidget*> window, QColor color)
-: _window(window)
-, _handle(GetWindowHandle(window)) {
-	init(color);
+: _window(window) {
+	setColor(color);
+
+	window->winIdValue(
+	) | rpl::start_with_next([=](WId id) {
+		destroy();
+		_handle = reinterpret_cast<HWND>(id);
+		create();
+	}, window->lifetime());
 }
 
 WindowShadow::~WindowShadow() {
@@ -55,10 +61,12 @@ void WindowShadow::setColor(QColor value) {
 	_r = value.red();
 	_g = value.green();
 	_b = value.blue();
-	if (!working()) {
-		return;
+	if (working()) {
+		updateColor();
 	}
+}
 
+void WindowShadow::updateColor() {
 	auto brush = getBrush(_alphas[0]);
 	for (auto i = 0; i != 4; ++i) {
 		auto graphics = Gdiplus::Graphics(_contexts[i]);
@@ -101,7 +109,7 @@ void WindowShadow::destroy() {
 	}
 }
 
-void WindowShadow::init(QColor color) {
+void WindowShadow::create() {
 	if (!_handle) {
 		return;
 	}
@@ -169,7 +177,7 @@ void WindowShadow::init(QColor color) {
 		return;
 	}
 
-	const auto avail = QApplication::desktop()->availableGeometry();
+	const auto avail = QApplication::primaryScreen()->availableGeometry();
 	_widthMax = std::max(avail.width(), 1);
 	_heightMax = std::max(avail.height(), 1);
 
@@ -231,7 +239,7 @@ void WindowShadow::init(QColor color) {
 
 		SelectObject(_contexts[i], _bitmaps[i]);
 	}
-	setColor(color);
+	updateColor();
 }
 
 void WindowShadow::initCorners(Directions directions) {
@@ -316,7 +324,7 @@ void WindowShadow::horCorners(int w, Gdiplus::Graphics *pgraphics0, Gdiplus::Gra
 }
 
 Gdiplus::Color WindowShadow::getColor(uchar alpha) const {
-	return Gdiplus::Color(BYTE(alpha), _r, _g, _b);
+	return Gdiplus::Color(BYTE(::Platform::IsWindows11OrGreater() ? 1 : alpha), _r, _g, _b);
 }
 
 Gdiplus::SolidBrush WindowShadow::getBrush(uchar alpha) const {
@@ -564,7 +572,6 @@ LRESULT WindowShadow::windowCallback(
 		if (!_resizeEnabled) {
 			return HTNOWHERE;
 		}
-		const auto xPos = GET_X_LPARAM(lParam);
 		const auto yPos = GET_Y_LPARAM(lParam);
 		if (hwnd == _handles[0]) {
 			return HTTOP;

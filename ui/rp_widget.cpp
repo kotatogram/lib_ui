@@ -6,61 +6,24 @@
 //
 #include "ui/rp_widget.h"
 
-#include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
 #include "ui/gl/gl_detection.h"
 
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
 #include <QtGui/QColorSpace>
-#include <private/qwidget_p.h>
-
-class TWidgetPrivate : public QWidgetPrivate {
-public:
-#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
-	TWidgetPrivate(int version = QObjectPrivateVersion)
-	: QWidgetPrivate(version) {
-		[[maybe_unused]] static const auto Once = [] {
-			if (::Platform::IsWayland()
-				&& Ui::GL::ChooseBackendDefault(
-						Ui::GL::CheckCapabilities(nullptr, true))
-					== Ui::GL::Backend::OpenGL) {
-				qApp->setProperty("_q_widgets_highdpi_downscale", true);
-				WaylandGL = true;
-			}
-			return true;
-		}();
-	}
-
-	QPlatformBackingStoreRhiConfig rhiConfig() const override {
-		const auto q = static_cast<TWidget*>(q_ptr);
-		if (!q->testAttribute(Qt::WA_WState_Created)
-			|| (!q->testAttribute(Qt::WA_NativeWindow)
-				&& !q->isWindow())) {
-			return QWidgetPrivate::rhiConfig();
-		}
-		if (const auto config = q->rhiConfig()) {
-			return *config;
-		}
-		// fix flickering on GNOME
-		if (WaylandGL) {
-			return { QPlatformBackingStoreRhiConfig::OpenGL };
-		}
-		return QWidgetPrivate::rhiConfig();
-	}
-#endif // Qt >= 6.4.0
-
-private:
-	static bool WaylandGL;
-};
-
-bool TWidgetPrivate::WaylandGL = false;
+#include <QtWidgets/QApplication>
 
 TWidget::TWidget(QWidget *parent)
-: TWidgetHelper<QWidget>(*(new TWidgetPrivate), parent, {}) {
+: TWidgetHelper<QWidget>(parent) {
 	[[maybe_unused]] static const auto Once = [] {
 		auto format = QSurfaceFormat::defaultFormat();
 		format.setSwapInterval(0);
+#ifdef DESKTOP_APP_USE_ANGLE
+		format.setRedBufferSize(8);
+		format.setGreenBufferSize(8);
+		format.setBlueBufferSize(8);
+#endif // DESKTOP_APP_USE_ANGLE
 #ifdef Q_OS_MAC
 		format.setColorSpace(QColorSpace::SRgb);
 #endif // Q_OS_MAC
@@ -162,7 +125,20 @@ rpl::producer<int> RpWidgetWrap::desiredHeightValue() const {
 
 rpl::producer<bool> RpWidgetWrap::shownValue() const {
 	auto &stream = eventStreams().shown;
-	return stream.events_starting_with(!rpWidget()->isHidden());
+	return stream.events_starting_with(!rpWidget()->isHidden())
+		| rpl::distinct_until_changed();
+}
+
+rpl::producer<not_null<QScreen*>> RpWidgetWrap::screenValue() const {
+	auto &stream = eventStreams().screen;
+	return stream.events_starting_with(rpWidget()->screen());
+}
+
+rpl::producer<bool> RpWidgetWrap::windowActiveValue() const {
+	auto &stream = eventStreams().windowActive;
+	return stream.events_starting_with(
+		QApplication::activeWindow() == rpWidget()->window()
+	) | rpl::distinct_until_changed();
 }
 
 rpl::producer<QRect> RpWidgetWrap::paintRequest() const {
@@ -173,24 +149,24 @@ rpl::producer<> RpWidgetWrap::alive() const {
 	return eventStreams().alive.events();
 }
 
-rpl::producer<> RpWidgetWrap::windowDeactivateEvents() const {
-	const auto window = rpWidget()->window()->windowHandle();
-	Assert(window != nullptr);
-
-	return base::qt_signal_producer(
-		window,
-		&QWindow::activeChanged
-	) | rpl::filter([=] {
-		return !window->isActive();
-	});
+rpl::producer<> RpWidgetWrap::death() const {
+	return alive() | rpl::then(rpl::single(rpl::empty));
 }
 
 rpl::producer<> RpWidgetWrap::macWindowDeactivateEvents() const {
 #ifdef Q_OS_MAC
-	return windowDeactivateEvents();
+	return windowActiveValue()
+		| rpl::skip(1)
+		| rpl::filter(!rpl::mappers::_1)
+		| rpl::to_empty;
 #else // Q_OS_MAC
 	return rpl::never<rpl::empty_value>();
 #endif // Q_OS_MAC
+}
+
+rpl::producer<WId> RpWidgetWrap::winIdValue() const {
+	auto &stream = eventStreams().winId;
+	return stream.events_starting_with(rpWidget()->internalWinId());
 }
 
 rpl::lifetime &RpWidgetWrap::lifetime() {
@@ -214,6 +190,33 @@ bool RpWidgetWrap::handleEvent(QEvent *event) {
 		}
 	}
 	switch (event->type()) {
+	case QEvent::Show:
+	case QEvent::Hide:
+		if (rpWidget()->isWindow() && streams->shown.has_consumers()) {
+			if (!allAreObserved) {
+				that = rpWidget();
+			}
+			streams->shown.fire_copy(!rpWidget()->isHidden());
+			if (!that) {
+				return true;
+			}
+		}
+		break;
+
+	case QEvent::WindowActivate:
+	case QEvent::WindowDeactivate:
+		if (streams->windowActive.has_consumers()) {
+			if (!allAreObserved) {
+				that = rpWidget();
+			}
+			streams->windowActive.fire_copy(
+				QApplication::activeWindow() == rpWidget()->window());
+			if (!that) {
+				return true;
+			}
+		}
+		break;
+
 	case QEvent::Move:
 	case QEvent::Resize:
 		if (streams->geometry.has_consumers()) {
@@ -221,6 +224,18 @@ bool RpWidgetWrap::handleEvent(QEvent *event) {
 				that = rpWidget();
 			}
 			streams->geometry.fire_copy(rpWidget()->geometry());
+			if (!that) {
+				return true;
+			}
+		}
+		break;
+
+	case QEvent::ScreenChangeInternal:
+		if (streams->screen.has_consumers()) {
+			if (!allAreObserved) {
+				that = rpWidget();
+			}
+			streams->screen.fire_copy(rpWidget()->screen());
 			if (!that) {
 				return true;
 			}
@@ -239,6 +254,17 @@ bool RpWidgetWrap::handleEvent(QEvent *event) {
 			}
 		}
 		break;
+
+	case QEvent::WinIdChange:
+		if (streams->winId.has_consumers()) {
+			if (!allAreObserved) {
+				that = rpWidget();
+			}
+			streams->winId.fire_copy(rpWidget()->internalWinId());
+			if (!that) {
+				return true;
+			}
+		}
 	}
 
 	return eventHook(event);

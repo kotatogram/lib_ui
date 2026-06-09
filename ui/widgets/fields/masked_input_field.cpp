@@ -8,7 +8,9 @@
 
 #include "base/qt/qt_common_adapters.h"
 #include "ui/painter.h"
+#include "ui/qt_weak_factory.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/integration.h"
 #include "styles/palette.h"
 #include "styles/style_widgets.h"
 
@@ -66,7 +68,7 @@ MaskedInputField::MaskedInputField(
 , _placeholderFull(std::move(placeholder)) {
 	resize(_st.width, _st.heightMin);
 
-	setFont(_st.font);
+	setFont(_st.style.font);
 	setAlignment(_st.textAlign);
 
 	_placeholderFull.value(
@@ -80,7 +82,9 @@ MaskedInputField::MaskedInputField(
 	}, lifetime());
 	updatePalette();
 
-	setAttribute(Qt::WA_OpaquePaintEvent);
+	if (_st.textBg->c.alphaF() >= 1. && !_st.borderRadius) {
+		setAttribute(Qt::WA_OpaquePaintEvent);
+	}
 
 	connect(this, SIGNAL(textChanged(QString)), this, SLOT(onTextChange(QString)));
 	connect(this, SIGNAL(cursorPositionChanged(int,int)), this, SLOT(onCursorPositionChanged(int,int)));
@@ -480,11 +484,11 @@ QRect MaskedInputField::placeholderRect() const {
 }
 
 style::font MaskedInputField::phFont() {
-	return _st.font;
+	return _st.style.font;
 }
 
 void MaskedInputField::placeholderAdditionalPrepare(QPainter &p) {
-	p.setFont(_st.font);
+	p.setFont(_st.style.font);
 	p.setPen(_st.placeholderFg);
 }
 
@@ -494,6 +498,9 @@ void MaskedInputField::keyPressEvent(QKeyEvent *e) {
 
 	if (_customUpDown && (e->key() == Qt::Key_Up || e->key() == Qt::Key_Down || e->key() == Qt::Key_PageUp || e->key() == Qt::Key_PageDown)) {
 		e->ignore();
+	} else if (e == QKeySequence::DeleteStartOfWord && hasSelectedText()) {
+		e->accept();
+		backspace();
 	} else {
 		QLineEdit::keyPressEvent(e);
 	}

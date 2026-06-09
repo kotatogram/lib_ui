@@ -14,6 +14,9 @@
 #include "ui/basic_click_handlers.h" // UrlClickHandler
 #include "ui/inactive_press.h"
 #include "ui/painter.h"
+#include "ui/qt_weak_factory.h"
+#include "ui/integration.h"
+#include "ui/ui_utility.h"
 #include "base/qt/qt_common_adapters.h"
 #include "styles/style_layers.h"
 #include "styles/palette.h"
@@ -240,7 +243,8 @@ FlatLabel::FlatLabel(
 	QWidget *parent,
 	rpl::producer<TextWithEntities> &&text,
 	const style::FlatLabel &st,
-	const style::PopupMenu &stMenu)
+	const style::PopupMenu &stMenu,
+	const Fn<std::any(Fn<void()>)> &makeContext)
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
@@ -249,8 +253,10 @@ FlatLabel::FlatLabel(
 	textUpdated();
 	std::move(
 		text
-	) | rpl::start_with_next([this](const TextWithEntities &value) {
-		setMarkedText(value);
+	) | rpl::start_with_next([=](const TextWithEntities &value) {
+		setMarkedText(
+			value,
+			makeContext ? makeContext([=] { update(); }) : std::any());
 	}, lifetime());
 	init();
 }

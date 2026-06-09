@@ -24,8 +24,9 @@ enum class HitTestResult;
 enum class WindowTitleHitTestFlag {
 	None       = 0x00,
 	Move       = 0x01,
-	Maximize   = 0x02,
-	FullScreen = 0x04,
+	Menu       = 0x02,
+	Maximize   = 0x04,
+	FullScreen = 0x08,
 };
 inline constexpr bool is_flag_type(WindowTitleHitTestFlag) {
 	return true;
@@ -70,6 +71,10 @@ public:
 	void close();
 	[[nodiscard]] int manualRoundingRadius() const;
 	void setBodyTitleArea(Fn<WindowTitleHitTestFlags(QPoint)> testMethod);
+
+	// Check if MouseButtonRelease was from the pressed state being
+	// cancelled by startSystemMove / startSystemResize call.
+	[[nodiscard]] bool mousePressCancelled() const;
 
 	[[nodiscard]] const style::TextStyle &titleTextStyle() const;
 

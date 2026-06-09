@@ -13,6 +13,8 @@
 #include "ui/layers/layer_widget.h"
 #include "ui/text/text_entity.h"
 
+#include <rpl/variable.h>
+
 class Painter;
 
 namespace style {
@@ -37,8 +39,11 @@ class PopupMenu;
 class LayerStackWidget;
 class LayerWidget;
 class FlatLabel;
+class InputField;
 template <typename Widget>
 class FadeWrapScaled;
+template <typename Widget>
+class FadeWrap;
 
 struct SeparatePanelArgs {
 	QWidget *parent = nullptr;
@@ -53,7 +58,8 @@ public:
 
 	void setTitle(rpl::producer<QString> title);
 	void setTitleHeight(int height);
-	void setInnerSize(QSize size);
+	void setTitleBadge(object_ptr<RpWidget> badge);
+	void setInnerSize(QSize size, bool allowResize = false);
 	[[nodiscard]] QRect innerGeometry() const;
 
 	void setHideOnDeactivate(bool hideOnDeactivate);
@@ -77,9 +83,16 @@ public:
 	[[nodiscard]] rpl::producer<> closeEvents() const;
 	void setBackAllowed(bool allowed);
 
+	void updateBackToggled();
+
 	void setMenuAllowed(Fn<void(const Menu::MenuCallback&)> fill);
+	void setSearchAllowed(
+		rpl::producer<QString> placeholder,
+		Fn<void(std::optional<QString>)> queryChanged);
+	bool closeSearch();
 
 	void overrideTitleColor(std::optional<QColor> color);
+	void overrideBottomBarColor(std::optional<QColor> color);
 
 	base::weak_ptr<Toast::Instance> showToast(Toast::Config &&config);
 	base::weak_ptr<Toast::Instance> showToast(
@@ -105,6 +118,8 @@ protected:
 	bool eventHook(QEvent *e) override;
 
 private:
+	class ResizeEdge;
+
 	void initControls();
 	void initLayout(const SeparatePanelArgs &args);
 	void initGeometry(QSize size);
@@ -131,21 +146,34 @@ private:
 	void updateTitleButtonColors(not_null<IconButton*> button);
 	void updateTitleColors();
 
+	void toggleSearch(bool shown);
+	[[nodiscard]] rpl::producer<> allBackRequests() const;
+	[[nodiscard]] rpl::producer<> allCloseRequests() const;
+
 	object_ptr<IconButton> _close;
 	object_ptr<IconButton> _menuToggle = { nullptr };
+	object_ptr<FadeWrapScaled<IconButton>> _searchToggle = { nullptr };
+	rpl::variable<QString> _searchPlaceholder;
+	Fn<void(std::optional<QString>)> _searchQueryChanged;
+	object_ptr<FadeWrap<RpWidget>> _searchWrap = { nullptr };
+	InputField *_searchField = nullptr;
 	object_ptr<FlatLabel> _title = { nullptr };
+	object_ptr<RpWidget> _titleBadge = { nullptr };
 	object_ptr<FadeWrapScaled<IconButton>> _back;
 	object_ptr<RpWidget> _body;
 	base::unique_qptr<RpWidget> _inner;
 	base::unique_qptr<LayerStackWidget> _layer = { nullptr };
 	base::unique_qptr<PopupMenu> _menu;
+	std::vector<std::unique_ptr<ResizeEdge>> _resizeEdges;
 	rpl::event_stream<> _synteticBackRequests;
 	rpl::event_stream<> _userCloseRequests;
 	rpl::event_stream<> _closeEvents;
 
 	int _titleHeight = 0;
+	bool _allowResize = false;
 	bool _hideOnDeactivate = false;
 	bool _useTransparency = true;
+	bool _backAllowed = false;
 	style::margins _padding;
 
 	bool _dragging = false;
@@ -165,6 +193,9 @@ private:
 	base::flat_map<
 		not_null<IconButton*>,
 		std::unique_ptr<style::IconButton>> _titleOverrideStyles;
+
+	std::optional<QColor> _bottomBarOverrideColor;
+	QPixmap _bottomBarOverrideBorderParts;
 
 	Fn<bool(int zorder)> _animationsPaused;
 

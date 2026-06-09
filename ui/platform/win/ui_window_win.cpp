@@ -12,6 +12,8 @@
 #include "ui/platform/ui_platform_utility.h"
 #include "ui/widgets/rp_window.h"
 #include "ui/widgets/elastic_scroll.h"
+#include "ui/qt_object_factory.h"
+#include "ui/ui_utility.h"
 #include "base/platform/win/base_windows_safe_library.h"
 #include "base/platform/base_platform_info.h"
 #include "base/event_filter.h"
@@ -21,7 +23,6 @@
 #include "styles/palette.h"
 #include "styles/style_widgets.h"
 
-#include <QtCore/QAbstractNativeEventFilter>
 #include <QtCore/QPoint>
 #include <QtGui/QWindow>
 #include <QtWidgets/QStyleFactory>
@@ -153,17 +154,6 @@ void FixAeroSnap(HWND handle) {
 		GetWindowLongPtr(handle, GWL_STYLE) | WS_CAPTION | WS_THICKFRAME);
 }
 
-[[nodiscard]] HWND ResolveWindowHandle(not_null<QWidget*> widget) {
-	if (!::Platform::IsWindows8OrGreater()) {
-		widget->setWindowFlag(Qt::FramelessWindowHint);
-	}
-	const auto result = GetWindowHandle(widget);
-	if (!::Platform::IsWindows8OrGreater()) {
-		FixAeroSnap(result);
-	}
-	return result;
-}
-
 [[nodiscard]] Qt::KeyboardModifiers LookupModifiers() {
 	const auto check = [](int key) {
 		return (GetKeyState(key) & 0x8000) != 0;
@@ -188,64 +178,18 @@ void FixAeroSnap(HWND handle) {
 
 } // namespace
 
-class WindowHelper::NativeFilter final : public QAbstractNativeEventFilter {
-public:
-	void registerWindow(HWND handle, not_null<WindowHelper*> helper);
-	void unregisterWindow(HWND handle);
-
-	bool nativeEventFilter(
-		const QByteArray &eventType,
-		void *message,
-		long *result) override;
-
-private:
-	base::flat_map<HWND, not_null<WindowHelper*>> _windowByHandle;
-
-};
-
-void WindowHelper::NativeFilter::registerWindow(
-		HWND handle,
-		not_null<WindowHelper*> helper) {
-	_windowByHandle.emplace(handle, helper);
-}
-
-void WindowHelper::NativeFilter::unregisterWindow(HWND handle) {
-	_windowByHandle.remove(handle);
-}
-
-bool WindowHelper::NativeFilter::nativeEventFilter(
-		const QByteArray &eventType,
-		void *message,
-		long *result) {
-	auto filtered = false;
-	const auto msg = static_cast<MSG*>(message);
-	const auto i = _windowByHandle.find(msg->hwnd);
-	if (i != end(_windowByHandle)) {
-		base::Integration::Instance().enterFromEventLoop([&] {
-			filtered = i->second->handleNativeEvent(
-				msg->message,
-				msg->wParam,
-				msg->lParam,
-				reinterpret_cast<LRESULT*>(result));
-		});
-	}
-	return filtered;
-}
-
 WindowHelper::WindowHelper(not_null<RpWidget*> window)
 : BasicWindowHelper(window)
-, _handle(ResolveWindowHandle(window))
+, NativeEventFilter(window)
 , _title(Ui::CreateChild<TitleWidget>(window.get()))
-, _body(Ui::CreateChild<RpWidget>(window.get()))
-, _dpi(GetDpiForWindowSupported() ? GetDpiForWindow(_handle) : 0) {
-	Expects(_handle != nullptr);
-
+, _body(Ui::CreateChild<RpWidget>(window.get())) {
+	if (!::Platform::IsWindows8OrGreater()) {
+		window->setWindowFlag(Qt::FramelessWindowHint);
+	}
 	init();
 }
 
-WindowHelper::~WindowHelper() {
-	GetNativeFilter()->unregisterWindow(_handle);
-}
+WindowHelper::~WindowHelper() = default;
 
 void WindowHelper::initInWindow(not_null<RpWindow*> window) {
 	_title->initInWindow(window);
@@ -276,7 +220,11 @@ rpl::producer<int> WindowHelper::additionalContentPaddingValue() const {
 
 void WindowHelper::setTitle(const QString &title) {
 	_title->setText(title);
-	window()->setWindowTitle(title);
+
+	// Windows shows them as FSI and PDI in squares(!)
+	window()->setWindowTitle(QString(title)
+		.replace(QChar(0x2068), QString())
+		.replace(QChar(0x2069), QString()));
 }
 
 void WindowHelper::setTitleStyle(const style::WindowTitle &st) {
@@ -285,42 +233,41 @@ void WindowHelper::setTitleStyle(const style::WindowTitle &st) {
 }
 
 void WindowHelper::setNativeFrame(bool enabled) {
-	if (!::Platform::IsWindows8OrGreater()) {
+	if (_handle && !::Platform::IsWindows8OrGreater()) {
 		window()->windowHandle()->setFlag(Qt::FramelessWindowHint, !enabled);
 		if (!enabled) {
 			FixAeroSnap(_handle);
 		}
 	}
 	_title->setVisible(!enabled);
-	if (enabled || ::Platform::IsWindows11OrGreater()) {
-		_shadow.reset();
-	} else {
-		_shadow.emplace(window(), st::windowShadowFg->c);
-		_shadow->setResizeEnabled(!fixedSize());
-		initialShadowUpdate();
+	if (_handle) {
+		updateShadow();
+		updateCornersRounding();
+		updateMargins();
+		updateWindowFrameColors();
+		fixMaximizedWindow();
+		SetWindowPos(
+			_handle,
+			0,
+			0,
+			0,
+			0,
+			0,
+			(SWP_FRAMECHANGED
+				| SWP_NOMOVE
+				| SWP_NOSIZE
+				| SWP_NOZORDER
+				| SWP_NOACTIVATE));
 	}
-	updateCornersRounding();
-	updateMargins();
-	updateWindowFrameColors();
-	fixMaximizedWindow();
-	SetWindowPos(
-		_handle,
-		0,
-		0,
-		0,
-		0,
-		0,
-		SWP_FRAMECHANGED
-			| SWP_NOMOVE
-			| SWP_NOSIZE
-			| SWP_NOZORDER
-			| SWP_NOACTIVATE);
 }
 
-void WindowHelper::initialShadowUpdate() {
-	if (!_shadow) {
+void WindowHelper::updateShadow() {
+	if (!_handle || _title->isHidden() || nativeResize()) {
+		_shadow.reset();
 		return;
 	}
+	_shadow.emplace(window(), st::windowShadowFg->c);
+	_shadow->setResizeEnabled(!fixedSize());
 	using Change = WindowShadow::Change;
 	const auto noShadowStates = (Qt::WindowMinimized | Qt::WindowMaximized);
 	if ((window()->windowState() & noShadowStates) || window()->isHidden()) {
@@ -331,7 +278,7 @@ void WindowHelper::initialShadowUpdate() {
 }
 
 void WindowHelper::updateCornersRounding() {
-	if (!::Platform::IsWindows11OrGreater()) {
+	if (!_handle || !::Platform::IsWindows11OrGreater()) {
 		return;
 	}
 	const auto preference = (_isFullScreen || _isMaximizedAndTranslucent)
@@ -357,7 +304,7 @@ void WindowHelper::setFixedSize(QSize size) {
 }
 
 void WindowHelper::setGeometry(QRect rect) {
-	SetGeometryWithPossibleScreenChange(
+	SetGeometryAndScreen(
 		window(),
 		rect.marginsAdded({ 0, titleHeight(), 0, 0 }));
 }
@@ -405,7 +352,31 @@ void WindowHelper::overrideSystemButtonDown(HitTestResult button) {
 
 void WindowHelper::init() {
 	_title->show();
-	GetNativeFilter()->registerWindow(_handle, this);
+
+	window()->winIdValue() | rpl::start_with_next([=](WId winId) {
+		_handle = reinterpret_cast<HWND>(winId);
+
+		if (!::Platform::IsWindows8OrGreater()) {
+			const auto native = _title->isHidden();
+			window()->setWindowFlag(Qt::FramelessWindowHint, !native);
+			if (_handle && !native) {
+				FixAeroSnap(_handle);
+			}
+		}
+
+		if (_handle) {
+			_dpi = GetDpiForWindowSupported()
+				? GetDpiForWindow(_handle)
+				: 0;
+			updateWindowFrameColors();
+			updateShadow();
+			updateCornersRounding();
+			updateMargins();
+			if (window()->isHidden()) {
+				enableCloakingForHidden();
+			}
+		}
+	}, window()->lifetime());
 
 	style::PaletteChanged(
 	) | rpl::start_with_next([=] {
@@ -431,37 +402,14 @@ void WindowHelper::init() {
 			size.height() - (titleShown ? titleHeight : 0));
 	}, _body->lifetime());
 
-	hitTestRequests(
-	) | rpl::filter([=](not_null<HitTestRequest*> request) {
-		return ::Platform::IsWindows11OrGreater();
-	}) | rpl::start_with_next([=](not_null<HitTestRequest*> request) {
-		request->result = [=] {
-			const auto maximized = window()->isMaximized()
-				|| window()->isFullScreen();
-			const auto px = int(std::ceil(
-				st::windowTitleHeight
-					* window()->windowHandle()->devicePixelRatio()
-					/ 10.));
-			return (!maximized && (request->point.y() < px))
-				? HitTestResult::Top
-				: HitTestResult::Client;
-		}();
-	}, window()->lifetime());
-
 	_dpi.value() | rpl::start_with_next([=](uint dpi) {
 		updateMargins();
 	}, window()->lifetime());
 
-	if (!::Platform::IsWindows11OrGreater()) {
-		_shadow.emplace(window(), st::windowShadowFg->c);
-	}
-
-	if (!::Platform::IsWindows8OrGreater()) {
+	if (_handle && !::Platform::IsWindows8OrGreater()) {
 		SetWindowTheme(_handle, L" ", L" ");
 		QApplication::setStyle(QStyleFactory::create("Windows"));
 	}
-
-	updateWindowFrameColors();
 
 	const auto handleStateChanged = [=](Qt::WindowState state) {
 		if (fixedSize() && (state & Qt::WindowMaximized)) {
@@ -484,78 +432,22 @@ void WindowHelper::init() {
 		&QWindow::windowStateChanged,
 		handleStateChanged);
 
-	initialShadowUpdate();
-	updateCornersRounding();
-
-	auto dm = std::make_unique<DirectManipulation>(window());
-	if (dm->valid()) {
-		_directManipulation = std::move(dm);
-		_directManipulation->events(
-		) | rpl::start_with_next([=](const DirectManipulationEvent &event) {
-			handleDirectManipulationEvent(event);
-		}, window()->lifetime());
-	}
+	ActivateDirectManipulation(window());
 
 	window()->shownValue() | rpl::filter([=](bool shown) {
-		return !shown;
+		return _handle && !shown;
 	}) | rpl::start_with_next([=] {
-		updateCloaking();
-
-		const auto qwindow = window()->windowHandle();
-		const auto firstPaintEventFilter = std::make_shared<QObject*>();
-		*firstPaintEventFilter = base::install_event_filter(
-			qwindow,
-			[=](not_null<QEvent*> e) {
-				if (e->type() == QEvent::Expose && qwindow->isExposed()) {
-					InvokeQueued(qwindow, [=] {
-						InvokeQueued(qwindow, [=] {
-							updateCloaking();
-						});
-					});
-					delete base::take(*firstPaintEventFilter);
-				}
-				return base::EventFilterResult::Continue;
-			});
+		enableCloakingForHidden();
 	}, window()->lifetime());
 }
 
-void WindowHelper::handleDirectManipulationEvent(
-		const DirectManipulationEvent &event) {
-	using Type = DirectManipulationEventType;
-	const auto send = [&](Qt::ScrollPhase phase) {
-		if (const auto windowHandle = window()->windowHandle()) {
-			auto global = POINT();
-			::GetCursorPos(&global);
-			auto local = global;
-			::ScreenToClient(_handle, &local);
-			const auto dpi = _dpi.current() ? double(_dpi.current()) : 96.;
-			const auto delta = QPointF(event.delta) / (dpi / 96.);
-			QWindowSystemInterface::handleWheelEvent(
-				windowHandle,
-				QPointF(local.x, local.y),
-				QPointF(global.x, global.y),
-				delta.toPoint(),
-				(delta * kPixelToAngleDelta).toPoint(),
-				LookupModifiers(),
-				phase,
-				Qt::MouseEventSynthesizedBySystem);
-		}
-	};
-	switch (event.type) {
-	case Type::ScrollStart: send(Qt::ScrollBegin); break;
-	case Type::Scroll: send(Qt::ScrollUpdate); break;
-	case Type::FlingStart:
-	case Type::Fling: send(Qt::ScrollMomentum); break;
-	case Type::ScrollStop: send(Qt::ScrollEnd); break;
-	case Type::FlingStop: send(Qt::ScrollEnd); break;
-	}
-}
-
-bool WindowHelper::handleNativeEvent(
+bool WindowHelper::filterNativeEvent(
 		UINT msg,
 		WPARAM wParam,
 		LPARAM lParam,
 		LRESULT *result) {
+	Expects(_handle != nullptr);
+
 	if (handleSystemButtonEvent(msg, wParam, lParam, result)) {
 		return true;
 	}
@@ -597,8 +489,7 @@ bool WindowHelper::handleNativeEvent(
 			return GetWindowPlacement(_handle, &wp)
 				&& (wp.showCmd == SW_SHOWMAXIMIZED);
 		}();
-		const auto addBorders = maximized
-			|| ::Platform::IsWindows11OrGreater();
+		const auto addBorders = maximized || nativeResize();
 		if (addBorders) {
 			const auto dpi = _dpi.current();
 			const auto borderWidth = (GetSystemMetricsForDpiSupported() && dpi)
@@ -747,6 +638,15 @@ bool WindowHelper::handleNativeEvent(
 			if (!window()->rect().contains(mapped)) {
 				return DefWindowProc(_handle, msg, wParam, lParam);
 			}
+			const auto maximized = window()->isMaximized()
+				|| window()->isFullScreen();
+			const auto px = int(std::ceil(
+				st::windowTitleHeight
+					* window()->windowHandle()->devicePixelRatio()
+					/ 10.));
+			if (nativeResize() && !maximized && (mapped.y() < px)) {
+				return HTTOP;
+			}
 			auto request = HitTestRequest{
 				.point = mapped,
 			};
@@ -779,13 +679,6 @@ bool WindowHelper::handleNativeEvent(
 		InvokeQueued(_title, [=] {
 			_title->refreshAdditionalPaddings(_handle);
 		});
-	} return false;
-
-	case DM_POINTERHITTEST: {
-		if (_directManipulation) {
-			_directManipulation->handlePointerHitTest(wParam);
-			return true;
-		}
 	} return false;
 
 	}
@@ -881,12 +774,28 @@ int WindowHelper::titleHeight() const {
 	return _title->isHidden() ? 0 : _title->height();
 }
 
+bool WindowHelper::nativeResize() const {
+	Expects(window()->windowHandle() != nullptr);
+
+	if (::Platform::IsWindows11OrGreater()) {
+		switch (window()->windowHandle()->surfaceType()) {
+		case QSurface::RasterSurface:
+		case QSurface::RasterGLSurface:
+			return window()->windowHandle()->format().alphaBufferSize() <= 0;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
 void WindowHelper::updateWindowFrameColors() {
 	updateWindowFrameColors(window()->isActiveWindow());
 }
 
 void WindowHelper::updateWindowFrameColors(bool active) {
-	if (!::Platform::IsWindows11OrGreater()) {
+	if (!_handle || !::Platform::IsWindows11OrGreater()) {
 		return;
 	}
 	const auto bg = active
@@ -910,13 +819,39 @@ void WindowHelper::updateWindowFrameColors(bool active) {
 }
 
 void WindowHelper::updateCloaking() {
+	if (!_handle) {
+		return;
+	}
 	const auto enabled = window()->isHidden() && !_isFullScreen;
 	const auto flag = BOOL(enabled ? TRUE : FALSE);
 	DwmSetWindowAttribute(_handle, DWMWA_CLOAK, &flag, sizeof(flag));
 }
 
+void WindowHelper::enableCloakingForHidden() {
+	Expects(_handle != nullptr);
+
+	updateCloaking();
+
+	const auto qwindow = window()->windowHandle();
+	const auto firstExposeFilter = std::make_shared<QObject*>();
+	const auto filter = [=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::Expose && qwindow->isExposed()) {
+			InvokeQueued(qwindow, [=] {
+				InvokeQueued(qwindow, [=] {
+					updateCloaking();
+				});
+			});
+			delete base::take(*firstExposeFilter);
+		}
+		return base::EventFilterResult::Continue;
+	};
+	*firstExposeFilter = base::install_event_filter(qwindow, filter);
+}
+
 void WindowHelper::updateMargins() {
-	if (_updatingMargins) return;
+	if (!_handle || _updatingMargins) {
+		return;
+	}
 
 	_updatingMargins = true;
 	const auto guard = gsl::finally([&] { _updatingMargins = false; });
@@ -930,7 +865,7 @@ void WindowHelper::updateMargins() {
 	} else {
 		AdjustWindowRectEx(&r, style, false, styleEx);
 	}
-	auto margins = ::Platform::IsWindows11OrGreater()
+	auto margins = nativeResize()
 		? QMargins(0, r.top, 0, 0)
 		: QMargins(r.left, r.top, -r.right, -r.bottom);
 	if (style & WS_MAXIMIZE) {
@@ -989,6 +924,9 @@ void WindowHelper::updateMargins() {
 }
 
 void WindowHelper::fixMaximizedWindow() {
+	if (!_handle) {
+		return;
+	}
 	const auto style = GetWindowLongPtr(_handle, GWL_STYLE);
 	if (style & WS_MAXIMIZE) {
 		auto w = RECT();
@@ -998,41 +936,26 @@ void WindowHelper::fixMaximizedWindow() {
 			mi.cbSize = sizeof(mi);
 			GetMonitorInfo(hMonitor, &mi);
 			const auto m = mi.rcWork;
-			SetWindowPos(_handle, 0, 0, 0, m.right - m.left - _marginsDelta.left() - _marginsDelta.right(), m.bottom - m.top - _marginsDelta.top() - _marginsDelta.bottom(), SWP_NOMOVE | SWP_NOSENDCHANGING | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREPOSITION);
+			SetWindowPos(
+				_handle,
+				0,
+				0,
+				0,
+				m.right - m.left - _marginsDelta.left() - _marginsDelta.right(),
+				m.bottom - m.top - _marginsDelta.top() - _marginsDelta.bottom(),
+				SWP_NOMOVE | SWP_NOSENDCHANGING | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREPOSITION);
 		}
 	}
 }
 
-not_null<WindowHelper::NativeFilter*> WindowHelper::GetNativeFilter() {
-	Expects(QCoreApplication::instance() != nullptr);
-
-	static const auto GlobalFilter = [&] {
-		const auto application = QCoreApplication::instance();
-		const auto filter = Ui::CreateChild<NativeFilter>(application);
-		application->installNativeEventFilter(filter);
-		return filter;
-	}();
-	return GlobalFilter;
-}
-
-HWND GetWindowHandle(not_null<QWidget*> widget) {
+HWND GetCurrentHandle(not_null<QWidget*> widget) {
 	const auto toplevel = widget->window();
-	toplevel->createWinId();
-	return GetWindowHandle(toplevel->windowHandle());
+	const auto window = toplevel->windowHandle();
+	return window ? GetCurrentHandle(window) : nullptr;
 }
 
-HWND GetWindowHandle(not_null<QWindow*> window) {
+HWND GetCurrentHandle(not_null<QWindow*> window) {
 	return reinterpret_cast<HWND>(window->winId());
-}
-
-void SendWMPaintForce(not_null<QWidget*> widget) {
-	const auto toplevel = widget->window();
-	toplevel->createWinId();
-	SendWMPaintForce(toplevel->windowHandle());
-}
-
-void SendWMPaintForce(not_null<QWindow*> window) {
-	::InvalidateRect(GetWindowHandle(window), nullptr, FALSE);
 }
 
 std::unique_ptr<BasicWindowHelper> CreateSpecialWindowHelper(

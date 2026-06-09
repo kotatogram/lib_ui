@@ -6,6 +6,7 @@
 //
 #include "ui/ui_utility.h"
 
+#include "ui/integration.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "ui/style/style_core.h"
 
@@ -81,6 +82,17 @@ void SendPendingEventsRecursive(QWidget *target, bool parentHiddenFlag) {
 
 bool AppInFocus() {
 	return QApplication::focusWidget() != nullptr;
+}
+
+bool InFocusChain(not_null<const QWidget*> widget) {
+	if (const auto top = widget->window()) {
+		if (auto focused = top->focusWidget()) {
+			return !widget->isHidden()
+				&& (focused == widget
+					|| widget->isAncestorOf(focused));
+		}
+	}
+	return false;
 }
 
 void SendPendingMoveResizeEvents(not_null<QWidget*> target) {
@@ -222,7 +234,8 @@ bool IsContentVisible(
 
 	return activeOrNotOverlapped
 		&& widget->isVisible()
-		&& !widget->window()->isMinimized();
+		&& !widget->window()->isMinimized()
+		&& widget->window()->windowHandle()->isExposed();
 }
 
 int WheelDirection(not_null<QWheelEvent*> e) {
@@ -252,10 +265,18 @@ QPoint MapFrom(
 	return { MapFrom(to, from, rect.topLeft()), rect.size() };
 }
 
-void SetGeometryWithPossibleScreenChange(
+void SetGeometryAndScreen(
 		not_null<QWidget*> widget,
 		QRect geometry) {
-	Platform::SetGeometryWithPossibleScreenChange(widget, geometry);
+	if (const auto screen = QGuiApplication::screenAt(geometry.center())) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+		widget->setScreen(screen);
+#else // Qt >= 6.0.0
+		widget->createWinId();
+		widget->windowHandle()->setScreen(screen);
+#endif // Qt < 6.0.0
+	}
+	widget->setGeometry(geometry);
 }
 
 } // namespace Ui

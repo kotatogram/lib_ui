@@ -11,6 +11,8 @@
 #include "ui/widgets/rp_window.h"
 #include "ui/widgets/shadow.h"
 #include "ui/painter.h"
+#include "ui/qt_object_factory.h"
+#include "ui/ui_utility.h"
 #include "styles/style_widgets.h"
 #include "styles/style_layers.h"
 #include "styles/palette.h"
@@ -181,7 +183,7 @@ void BasicWindowHelper::setStaysOnTop(bool enabled) {
 }
 
 void BasicWindowHelper::setGeometry(QRect rect) {
-	_window->setGeometry(rect);
+	SetGeometryAndScreen(_window, rect);
 }
 
 void BasicWindowHelper::showFullScreen() {
@@ -254,10 +256,15 @@ void BasicWindowHelper::setupBodyTitleAreaEvents() {
 			}
 		} else if (e->type() == QEvent::MouseButtonRelease) {
 			_mousePressed = false;
-		} else if (e->type() == QEvent::MouseButtonPress
-			&& (static_cast<QMouseEvent*>(e.get())->button()
-				== Qt::LeftButton)) {
-			_mousePressed = true;
+		} else if (e->type() == QEvent::MouseButtonPress) {
+			const auto ee = static_cast<QMouseEvent*>(e.get());
+			if (ee->button() == Qt::LeftButton) {
+				_mousePressed = true;
+			} else if (ee->button() == Qt::RightButton) {
+				if (hitTest() & WindowTitleHitTestFlag::Menu) {
+					ShowWindowMenu(window(), ee->windowPos().toPoint());
+				}
+			}
 		} else if (e->type() == QEvent::MouseMove) {
 			if (_mousePressed
 #ifndef Q_OS_WIN // We handle fullscreen startSystemMove() only on Windows.
@@ -273,11 +280,16 @@ void BasicWindowHelper::setupBodyTitleAreaEvents() {
 				}
 #endif // Q_OS_WIN
 				_mousePressed = false;
+				_mousePressCancelled = true;
+				const auto weak = QPointer(_window.get());
 				_window->windowHandle()->startSystemMove();
 				SendSynteticMouseEvent(
 					body().get(),
 					QEvent::MouseButtonRelease,
 					Qt::LeftButton);
+				if (weak) {
+					_mousePressCancelled = false;
+				}
 			}
 		}
 	}, body()->lifetime());
@@ -298,8 +310,39 @@ void DefaultWindowHelper::init() {
 		window()->setAttribute(Qt::WA_TranslucentBackground);
 	}
 
-	window()->createWinId();
 	_title->show();
+
+	rpl::combine(
+		window()->shownValue(),
+		_title->shownValue(),
+		_windowState.value()
+	) | rpl::filter([=](
+			bool shown,
+			bool titleShown,
+			Qt::WindowStates windowState) {
+		return shown;
+	}) | rpl::start_with_next([=](
+			bool shown,
+			bool titleShown,
+			Qt::WindowStates windowState) {
+		_lastGeometry = _body->mapToGlobal(_body->rect());
+		window()->windowHandle()->setFlag(Qt::FramelessWindowHint, titleShown);
+		updateWindowMargins();
+		if (_fixedSize) {
+			setFixedSize(*_fixedSize);
+		} else if (_minimumSize) {
+			setMinimumSize(*_minimumSize);
+		}
+	}, window()->lifetime());
+
+	_title->shownValue(
+	) | rpl::filter([=] {
+		return !window()->isHidden()
+			&& !window()->isMaximized()
+			&& !window()->isFullScreen();
+	}) | rpl::start_with_next([=] {
+		setGeometry(_lastGeometry);
+	}, window()->lifetime());
 
 	rpl::combine(
 		window()->widthValue(),
@@ -353,18 +396,6 @@ void DefaultWindowHelper::init() {
 	}) | rpl::start_with_next([=] {
 		Painter p(window());
 		paintBorders(p);
-	}, window()->lifetime());
-
-	rpl::combine(
-		window()->shownValue(),
-		_title->shownValue(),
-		_windowState.value()
-	) | rpl::start_with_next([=](
-			bool shown,
-			bool titleShown,
-			Qt::WindowStates windowState) {
-		window()->windowHandle()->setFlag(Qt::FramelessWindowHint, titleShown);
-		updateWindowMargins();
 	}, window()->lifetime());
 
 	window()->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
@@ -559,18 +590,18 @@ void DefaultWindowHelper::setNativeFrame(bool enabled) {
 }
 
 void DefaultWindowHelper::setMinimumSize(QSize size) {
-	const auto sizeWithMargins = size.grownBy(bodyPadding());
-	window()->setMinimumSize(sizeWithMargins);
+	_minimumSize = size;
+	window()->setMinimumSize(size.grownBy(bodyPadding()));
 }
 
 void DefaultWindowHelper::setFixedSize(QSize size) {
-	const auto sizeWithMargins = size.grownBy(bodyPadding());
-	window()->setFixedSize(sizeWithMargins);
+	_fixedSize = size;
+	window()->setFixedSize(size.grownBy(bodyPadding()));
 	_title->setResizeEnabled(false);
 }
 
 void DefaultWindowHelper::setGeometry(QRect rect) {
-	window()->setGeometry(rect.marginsAdded(bodyPadding()));
+	SetGeometryAndScreen(window(), rect.marginsAdded(bodyPadding()));
 }
 
 int DefaultWindowHelper::manualRoundingRadius() const {
@@ -626,7 +657,7 @@ void DefaultWindowHelper::updateWindowMargins() {
 		SetWindowMargins(window(), resizeArea());
 		_marginsSet = true;
 	} else if (_marginsSet) {
-		UnsetWindowMargins(window());
+		SetWindowMargins(window(), {});
 		_marginsSet = false;
 	}
 }

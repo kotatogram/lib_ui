@@ -35,8 +35,8 @@ public:
 
 private:
 	struct Digit {
-		QChar from = 0;
-		QChar to = 0;
+		QChar from = QChar(0);
+		QChar to = QChar(0);
 		int fromWidth = 0;
 		int toWidth = 0;
 	};
@@ -53,6 +53,7 @@ private:
 
 	int _fromWidth = 0;
 	int _toWidth = 0;
+	int _bothWidth = 0;
 
 	Ui::Animations::Simple _a_ready;
 	QString _delayedText;

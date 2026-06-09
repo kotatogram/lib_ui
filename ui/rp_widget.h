@@ -8,7 +8,6 @@
 
 #include "base/unique_qptr.h"
 #include "ui/style/style_core_direction.h"
-#include "ui/ui_utility.h"
 
 #include <rpl/event_stream.h>
 #include <rpl/map.h>
@@ -18,10 +17,6 @@
 #include <QtCore/QPointer>
 #include <QtGui/QtEvents>
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
-#include <qpa/qplatformbackingstore.h>
-#endif // Qt >= 6.4.0
-
 namespace Ui {
 
 void ToggleChildrenVisibility(not_null<QWidget*> widget, bool visible);
@@ -29,7 +24,6 @@ void ToggleChildrenVisibility(not_null<QWidget*> widget, bool visible);
 } // namespace Ui
 
 class TWidget;
-class TWidgetPrivate;
 
 template <typename Base>
 class TWidgetHelper : public Base {
@@ -151,12 +145,6 @@ protected:
 	virtual void enterFromChildEvent(QEvent *e, QWidget *child) {
 	}
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
-	virtual std::optional<QPlatformBackingStoreRhiConfig> rhiConfig() const {
-		return std::nullopt;
-	}
-#endif // Qt >= 6.4.0
-
 private:
 	TWidget *tparent() {
 		return qobject_cast<TWidget*>(Base::parentWidget());
@@ -167,8 +155,6 @@ private:
 
 	template <typename OtherBase>
 	friend class TWidgetHelper;
-
-	friend class TWidgetPrivate;
 
 };
 
@@ -290,10 +276,13 @@ public:
 	rpl::producer<int> topValue() const;
 	virtual rpl::producer<int> desiredHeightValue() const;
 	rpl::producer<bool> shownValue() const;
+	rpl::producer<not_null<QScreen*>> screenValue() const;
+	rpl::producer<bool> windowActiveValue() const;
 	rpl::producer<QRect> paintRequest() const;
 	rpl::producer<> alive() const;
-	rpl::producer<> windowDeactivateEvents() const;
+	rpl::producer<> death() const;
 	rpl::producer<> macWindowDeactivateEvents() const;
+	rpl::producer<WId> winIdValue() const;
 
 	template <typename Error, typename Generator>
 	void showOn(rpl::producer<bool, Error, Generator> &&shown) {
@@ -321,6 +310,9 @@ private:
 		rpl::event_stream<QRect> geometry;
 		rpl::event_stream<QRect> paint;
 		rpl::event_stream<bool> shown;
+		rpl::event_stream<not_null<QScreen*>> screen;
+		rpl::event_stream<bool> windowActive;
+		rpl::event_stream<WId> winId;
 		rpl::event_stream<> alive;
 	};
 	struct Initer {

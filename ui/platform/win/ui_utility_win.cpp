@@ -149,7 +149,7 @@ void FixPopupMenuNativeEmojiPopup(not_null<PopupMenu*> menu) {
 		bool nativeEventFilter(
 				const QByteArray &eventType,
 				void *message,
-				long *result) override {
+				native_event_filter_result *result) override {
 			const auto msg = static_cast<MSG*>(message);
 			switch (msg->message) {
 			case WM_MOUSELEAVE: if (msg->hwnd == hwnd()) {
@@ -179,22 +179,6 @@ void FixPopupMenuNativeEmojiPopup(not_null<PopupMenu*> menu) {
 
 	QGuiApplication::instance()->installNativeEventFilter(
 		menu->lifetime().make_state<Filter>(menu));
-}
-
-void SetGeometryWithPossibleScreenChange(
-		not_null<QWidget*> widget,
-		QRect geometry) {
-	if (const auto screen = QGuiApplication::screenAt(geometry.center())) {
-		const auto window = widget->window();
-		window->createWinId();
-		const auto handle = window->windowHandle();
-		if (handle->screen() != screen) {
-			handle->setScreen(screen);
-			window->move(screen->availableGeometry().topLeft());
-			window->show();
-		}
-	}
-	widget->setGeometry(geometry);
 }
 
 } // namespace Ui::Platform

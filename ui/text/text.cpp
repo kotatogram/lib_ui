@@ -7,15 +7,18 @@
 #include "ui/text/text.h"
 
 #include "ui/effects/spoiler_mess.h"
+#include "ui/text/text_block_parser.h"
 #include "ui/text/text_extended_data.h"
 #include "ui/text/text_isolated_emoji.h"
-#include "ui/text/text_parser.h"
 #include "ui/text/text_renderer.h"
+#include "ui/text/text_word_parser.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/integration.h"
 #include "ui/painter.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/style_basic.h"
+
+#include <QtGui/QGuiApplication>
 
 namespace Ui {
 
@@ -179,11 +182,14 @@ void ValidateQuotePaintCache(
 		QuotePaintCache &cache,
 		const style::QuoteStyle &st) {
 	const auto icon = st.icon.empty() ? nullptr : &st.icon;
+	const auto expand = st.expand.empty() ? nullptr : &st.expand;
+	const auto collapse = st.collapse.empty() ? nullptr : &st.collapse;
 	if (!cache.corners.isNull()
 		&& cache.bgCached == cache.bg
 		&& cache.outlines == cache.outlines
 		&& (!st.header || cache.headerCached == cache.header)
-		&& (!icon || cache.iconCached == cache.icon)) {
+		&& ((!icon && !expand && !collapse)
+			|| cache.iconCached == cache.icon)) {
 		return;
 	}
 	cache.bgCached = cache.bg;
@@ -191,7 +197,7 @@ void ValidateQuotePaintCache(
 	if (st.header) {
 		cache.headerCached = cache.header;
 	}
-	if (!st.icon.empty()) {
+	if (icon || expand || collapse) {
 		cache.iconCached = cache.icon;
 	}
 	const auto radius = st.radius;
@@ -281,6 +287,8 @@ void ValidateQuotePaintCache(
 
 	p.end();
 	cache.corners = std::move(image);
+	cache.expand = expand ? expand->instance(cache.icon) : QImage();
+	cache.collapse = collapse ? collapse->instance(cache.icon) : QImage();
 }
 
 void FillQuotePaint(
@@ -300,6 +308,7 @@ void FillQuotePaint(
 	const auto width = rect.width();
 	auto y = rect.top();
 	auto height = rect.height();
+	const auto till = y + height;
 	if (!parts.skippedTop) {
 		const auto top = std::min(height, hhalf);
 		p.drawImage(
@@ -400,12 +409,9 @@ void FillQuotePaint(
 				QRect(0, 0, skip * ratio, bottom * ratio));
 		}
 		height -= bottom;
-		if (!height) {
-			return;
-		}
 		rect.setHeight(height);
 	}
-	if (outline) {
+	if (outline && height > 0) {
 		if (!cache.outline.isNull()) {
 			const auto skipped = st.outlineShift
 				- (parts.skippedTop ? int(parts.skippedTop) : hhalf);
@@ -418,6 +424,24 @@ void FillQuotePaint(
 		}
 	}
 	p.fillRect(x + outline, y, width - outline, height, cache.bg);
+	const auto icon = parts.expandIcon
+		? &cache.expand
+		: parts.collapseIcon
+		? &cache.collapse
+		: nullptr;
+	if (icon && !icon->isNull()) {
+		const auto position = parts.expandIcon
+			? st.expandPosition
+			: st.collapsePosition;
+		const auto size = icon->size() / icon->devicePixelRatio();
+		p.drawImage(
+			QRect(
+				x + width - size.width() - position.x(),
+				till - size.height() - position.y(),
+				size.width(),
+				size.height()),
+			*icon);
+	}
 }
 
 String::ExtendedWrap::ExtendedWrap() noexcept = default;
@@ -451,6 +475,9 @@ String::ExtendedWrap::~ExtendedWrap() = default;
 
 void String::ExtendedWrap::adjustFrom(const ExtendedWrap *other) {
 	const auto data = get();
+	if (!data) {
+		return;
+	}
 	const auto raw = [](auto pointer) {
 		return reinterpret_cast<quintptr>(pointer);
 	};
@@ -459,15 +486,18 @@ void String::ExtendedWrap::adjustFrom(const ExtendedWrap *other) {
 		link->setText(
 			reinterpret_cast<String*>(otherText + raw(this) - raw(other)));
 	};
-	if (data) {
-		if (const auto spoiler = data->spoiler.get()) {
-			if (spoiler->link) {
-				adjust(spoiler->link);
-			}
+	if (const auto spoiler = data->spoiler.get()) {
+		if (spoiler->link) {
+			adjust(spoiler->link);
 		}
-		for (auto &quote : data->quotes) {
+	}
+	if (const auto quotes = data->quotes.get()) {
+		for (auto &quote : quotes->list) {
 			if (quote.copy) {
 				adjust(quote.copy);
+			}
+			if (quote.toggle) {
+				adjust(quote.toggle);
 			}
 		}
 	}
@@ -504,29 +534,34 @@ String &String::operator=(String &&other) = default;
 String::~String() = default;
 
 void String::setText(const style::TextStyle &st, const QString &text, const TextParseOptions &options) {
-	_st = &st;
-	clear();
-	{
-		Parser parser(this, { text }, options, {});
-	}
-	recountNaturalSize(true, options.dir);
+	setMarkedText(st, { text }, options);
 }
 
 void String::recountNaturalSize(
 		bool initial,
 		Qt::LayoutDirection optionsDirection) {
-	auto lastNewline = (NewlineBlock*)nullptr;
+	auto lastNewlineBlock = begin(_blocks);
 	auto lastNewlineStart = 0;
 	const auto computeParagraphDirection = [&](int paragraphEnd) {
 		const auto direction = (optionsDirection != Qt::LayoutDirectionAuto)
 			? optionsDirection
 			: StringDirection(_text, lastNewlineStart, paragraphEnd);
-		if (lastNewline) {
-			lastNewline->_paragraphLTR = (direction == Qt::LeftToRight);
-			lastNewline->_paragraphRTL = (direction == Qt::RightToLeft);
-		} else {
-			_startParagraphLTR = (direction == Qt::LeftToRight);
-			_startParagraphRTL = (direction == Qt::RightToLeft);
+
+		if (paragraphEnd) {
+			while (blockPosition(lastNewlineBlock) < lastNewlineStart) {
+				++lastNewlineBlock;
+			}
+			Assert(lastNewlineBlock != end(_blocks));
+			const auto block = lastNewlineBlock->get();
+			if (block->type() == TextBlockType::Newline) {
+				Assert(block->position() == lastNewlineStart);
+				static_cast<NewlineBlock*>(block)->setParagraphDirection(
+					direction);
+			} else {
+				Assert(!lastNewlineStart);
+				_startParagraphLTR = (direction == Qt::LeftToRight);
+				_startParagraphRTL = (direction == Qt::RightToLeft);
+			}
 		}
 	};
 
@@ -534,29 +569,27 @@ void String::recountNaturalSize(
 	auto quote = quoteByIndex(qindex);
 	auto qpadding = quotePadding(quote);
 	auto qminwidth = quoteMinWidth(quote);
+	auto qlinesleft = quoteLinesLimit(quote);
 	auto qmaxwidth = QFixed(qminwidth);
 	auto qoldheight = 0;
 
 	_maxWidth = 0;
 	_minHeight = qpadding.top();
-	auto lineHeight = 0;
+	const auto lineHeight = this->lineHeight();
 	auto maxWidth = QFixed();
 	auto width = QFixed(qminwidth);
 	auto last_rBearing = QFixed();
 	auto last_rPadding = QFixed();
-	for (auto &block : _blocks) {
-		const auto b = block.get();
-		const auto _btype = b->type();
-		const auto blockHeight = CountBlockHeight(b, _st);
-		if (_btype == TextBlockType::Newline) {
-			if (!lineHeight) {
-				lineHeight = blockHeight;
-			}
+	for (const auto &word : _words) {
+		if (word.newline()) {
+			const auto block = word.newlineBlockIndex();
+			const auto index = quoteIndex(_blocks[block].get());
+			const auto changed = (qindex != index);
+			const auto hidden = !qlinesleft;
 			accumulate_max(maxWidth, width);
 			accumulate_max(qmaxwidth, width);
 
-			const auto index = quoteIndex(b);
-			if (qindex != index) {
+			if (changed) {
 				_minHeight += qpadding.bottom();
 				if (quote) {
 					quote->maxWidth = qmaxwidth.ceil().toInt();
@@ -567,27 +600,30 @@ void String::recountNaturalSize(
 				quote = quoteByIndex(qindex);
 				qpadding = quotePadding(quote);
 				qminwidth = quoteMinWidth(quote);
+				qlinesleft = quoteLinesLimit(quote);
 				qmaxwidth = qminwidth;
 				_minHeight += qpadding.top();
 				qpadding.setTop(0);
+			} else if (qlinesleft > 0) {
+				--qlinesleft;
 			}
 			if (initial) {
-				computeParagraphDirection(b->position());
+				computeParagraphDirection(word.position());
 			}
-			lastNewlineStart = b->position();
-			lastNewline = &block.unsafe<NewlineBlock>();
+			lastNewlineStart = word.position();
 
-			_minHeight += lineHeight;
-			lineHeight = 0;
+			if (!hidden) {
+				_minHeight += lineHeight;
+			}
 			last_rBearing = 0;// b->f_rbearing(); (0 for newline)
-			last_rPadding = 0;// b->f_rpadding(); (0 for newline)
+			last_rPadding = word.f_rpadding();
 
 			width = qminwidth;
 			// + (b->f_width() - last_rBearing); (0 for newline)
 			continue;
 		}
 
-		auto b__f_rbearing = b->f_rbearing(); // cache
+		auto w__f_rbearing = word.f_rbearing(); // cache
 
 		// We need to accumulate max width after each block, because
 		// some blocks have width less than -1 * previous right bearing.
@@ -599,21 +635,23 @@ void String::recountNaturalSize(
 		accumulate_max(maxWidth, width);
 		accumulate_max(qmaxwidth, width);
 
-		width += last_rBearing + (last_rPadding + b->f_width() - b__f_rbearing);
-		lineHeight = qMax(lineHeight, blockHeight);
+		width += last_rBearing + (last_rPadding + word.f_width() - w__f_rbearing);
 
-		last_rBearing = b__f_rbearing;
-		last_rPadding = b->f_rpadding();
-		continue;
+		last_rBearing = w__f_rbearing;
+		last_rPadding = word.f_rpadding();
 	}
 	if (initial) {
 		computeParagraphDirection(_text.size());
 	}
 	if (width > 0) {
-		if (!lineHeight) {
-			lineHeight = CountBlockHeight(_blocks.back().get(), _st);
+		const auto useSkipHeight = (_blocks.back()->type() == TextBlockType::Skip)
+			&& (_words.back().f_width() == width);
+		_minHeight += qpadding.top() + qpadding.bottom();
+		if (qlinesleft != 0) {
+			_minHeight += useSkipHeight
+				? _blocks.back().unsafe<SkipBlock>().height()
+				: lineHeight;
 		}
-		_minHeight += qpadding.top() + lineHeight + qpadding.bottom();
 		accumulate_max(maxWidth, width);
 		accumulate_max(qmaxwidth, width);
 	}
@@ -621,16 +659,27 @@ void String::recountNaturalSize(
 	if (quote) {
 		quote->maxWidth = qmaxwidth.ceil().toInt();
 		quote->minHeight = _minHeight - qoldheight;
-		_endsWithQuote = true;
+		_endsWithQuoteOrOtherDirection = true;
 	} else {
-		_endsWithQuote = false;
+		const auto lastIsNewline = (lastNewlineBlock != end(_blocks))
+			&& (lastNewlineBlock->get()->type() == TextBlockType::Newline);
+		const auto lastNewline = lastIsNewline
+			? static_cast<NewlineBlock*>(lastNewlineBlock->get())
+			: nullptr;
+		const auto lastLineDirection = lastNewline
+			? lastNewline->paragraphDirection()
+			: _startParagraphRTL
+			? Qt::RightToLeft
+			: Qt::LeftToRight;
+		_endsWithQuoteOrOtherDirection
+			= (lastLineDirection != style::LayoutDirection());
 	}
 }
 
 int String::countMaxMonospaceWidth() const {
 	auto result = 0;
-	if (_extended) {
-		for (const auto &quote : _extended->quotes) {
+	if (const auto quotes = _extended ? _extended->quotes.get() : nullptr) {
+		for (const auto &quote : quotes->list) {
 			if (quote.pre) {
 				accumulate_max(result, quote.maxWidth);
 			}
@@ -667,9 +716,10 @@ void String::setMarkedText(const style::TextStyle &st, const TextWithEntities &t
 //			}
 //		}
 //		newText.append("},\n\n").append(text);
-//		Parser parser(this, { newText, EntitiesInText() }, options, context);
+//		BlockParser block(this, { newText, EntitiesInText() }, options, context);
 
-		Parser parser(this, textWithEntities, options, context);
+		BlockParser block(this, textWithEntities, options, context);
+		WordParser word(this);
 	}
 	recountNaturalSize(true, options.dir);
 }
@@ -714,6 +764,13 @@ void String::setSpoilerLinkFilter(Fn<bool(const ClickContext&)> filter) {
 		std::move(filter));
 }
 
+void String::setBlockquoteExpandCallback(
+		Fn<void(int index, bool expanded)> callback) {
+	Expects(_extended && _extended->quotes);
+
+	_extended->quotes->expandCallback = std::move(callback);
+}
+
 bool String::hasLinks() const {
 	return _extended && !_extended->links.empty();
 }
@@ -722,44 +779,83 @@ bool String::hasSpoilers() const {
 	return _extended && (_extended->spoiler != nullptr);
 }
 
+bool String::hasCollapsedBlockquots() const {
+	return _extended
+		&& _extended->quotes
+		&& ranges::any_of(_extended->quotes->list, &QuoteDetails::collapsed);
+}
+
+bool String::blockquoteCollapsed(int index) const {
+	Expects(_extended && _extended->quotes);
+	Expects(index > 0 && index <= _extended->quotes->list.size());
+
+	return _extended->quotes->list[index - 1].collapsed;
+}
+
+bool String::blockquoteExpanded(int index) const {
+	Expects(_extended && _extended->quotes);
+	Expects(index > 0 && index <= _extended->quotes->list.size());
+
+	return _extended->quotes->list[index - 1].expanded;
+}
+
+void String::setBlockquoteExpanded(int index, bool expanded) {
+	Expects(_extended && _extended->quotes);
+	Expects(index > 0 && index <= _extended->quotes->list.size());
+
+	auto &quote = _extended->quotes->list[index - 1];
+	if (quote.expanded == expanded) {
+		return;
+	}
+	quote.expanded = expanded;
+	recountNaturalSize(false);
+	if (const auto onstack = _extended->quotes->expandCallback) {
+		onstack(index, expanded);
+	}
+}
+
 bool String::hasSkipBlock() const {
 	return !_blocks.empty()
 		&& (_blocks.back()->type() == TextBlockType::Skip);
 }
 
 bool String::updateSkipBlock(int width, int height) {
+	if (!width || !height) {
+		return removeSkipBlock();
+	}
 	if (!_blocks.empty() && _blocks.back()->type() == TextBlockType::Skip) {
-		const auto block = static_cast<SkipBlock*>(_blocks.back().get());
-		if (block->f_width().toInt() == width && block->height() == height) {
+		const auto &block = _blocks.back().unsafe<SkipBlock>();
+		if (block.width() == width && block.height() == height) {
 			return false;
 		}
-		const auto size = block->position();
+		const auto size = block.position();
 		_text.resize(size);
 		_blocks.pop_back();
+		_words.pop_back();
 		removeModificationsAfter(size);
-	} else if (_endsWithQuote) {
+	} else if (_endsWithQuoteOrOtherDirection) {
 		insertModifications(_text.size(), 1);
+		_words.push_back(Word(
+			uint16(_text.size()),
+			int(_blocks.size())));
+		_blocks.push_back(Block::Newline({
+			.position = _words.back().position(),
+		}, 0));
 		_text.push_back(QChar::LineFeed);
-		_blocks.push_back(Block::Newline(
-			_st->font,
-			_text,
-			_text.size() - 1,
-			1,
-			0,
-			0,
-			0));
 		_skipBlockAddedNewline = true;
 	}
 	insertModifications(_text.size(), 1);
-	_text.push_back('_');
-	_blocks.push_back(Block::Skip(
-		_st->font,
-		_text,
-		_text.size() - 1,
+	const auto unfinished = false;
+	const auto rbearing = 0;
+	_words.push_back(Word(
+		uint16(_text.size()),
+		unfinished,
 		width,
-		height,
-		0,
-		0));
+		rbearing));
+	_blocks.push_back(Block::Skip({
+		.position = _words.back().position(),
+	}, width, height));
+	_text.push_back('_');
 	recountNaturalSize(false);
 	return true;
 }
@@ -772,12 +868,15 @@ bool String::removeSkipBlock() {
 		_text.resize(size);
 		_blocks.pop_back();
 		_blocks.pop_back();
+		_words.pop_back();
+		_words.pop_back();
 		_skipBlockAddedNewline = false;
 		removeModificationsAfter(size);
 	} else {
 		const auto size = _blocks.back()->position();
 		_text.resize(size);
 		_blocks.pop_back();
+		_words.pop_back();
 		removeModificationsAfter(size);
 	}
 	recountNaturalSize(false);
@@ -924,6 +1023,7 @@ void String::enumerateLines(
 
 	auto qindex = 0;
 	auto quote = (QuoteDetails*)nullptr;
+	auto qlinesleft = -1;
 	auto qpadding = QMargins();
 
 	auto top = 0;
@@ -942,14 +1042,13 @@ void String::enumerateLines(
 		}
 		widthLeft = lineWidth - qpadding.left() - qpadding.right();
 	};
-	const auto initNextParagraph = [&](
-			TextBlocks::const_iterator i,
-			int16 paragraphIndex) {
+	const auto initNextParagraph = [&](int16 paragraphIndex) {
 		if (qindex != paragraphIndex) {
-			top += qpadding.bottom();
+			//top += qpadding.bottom(); // This was done before callback().
 			qindex = paragraphIndex;
 			quote = quoteByIndex(qindex);
 			qpadding = quotePadding(quote);
+			qlinesleft = quoteLinesLimit(quote);
 			top += qpadding.top();
 			qpadding.setTop(0);
 		}
@@ -957,141 +1056,102 @@ void String::enumerateLines(
 	};
 
 	if ((*_blocks.cbegin())->type() != TextBlockType::Newline) {
-		initNextParagraph(_blocks.cbegin(), _startQuoteIndex);
+		initNextParagraph(_startQuoteIndex);
 	}
 
-	auto lineHeight = 0;
+	const auto lineHeight = this->lineHeight();
 	auto last_rBearing = QFixed();
 	auto last_rPadding = QFixed();
-	bool longWordLine = true;
-	for (auto i = _blocks.cbegin(); i != _blocks.cend(); ++i) {
-		const auto &b = *i;
-		auto _btype = b->type();
-		const auto blockHeight = CountBlockHeight(b.get(), _st);
-
-		if (_btype == TextBlockType::Newline) {
-			if (!lineHeight) {
-				lineHeight = blockHeight;
-			}
-			const auto index = b.unsafe<const NewlineBlock>().quoteIndex();
+	auto longWordLine = true;
+	auto lastWordStart = begin(_words);
+	auto lastWordStart_wLeft = widthLeft;
+	for (auto w = lastWordStart, e = end(_words); w != e; ++w) {
+		if (w->newline()) {
+			const auto block = w->newlineBlockIndex();
+			const auto index = quoteIndex(_blocks[block].get());
+			const auto hidden = !qlinesleft;
 			const auto changed = (qindex != index);
 			if (changed) {
-				lineHeight += qpadding.bottom();
+				top += qpadding.bottom();
 			}
 
-			callback(lineLeft + lineWidth - widthLeft, top += lineHeight);
+			if (qlinesleft > 0) {
+				--qlinesleft;
+			}
+			if (!hidden) {
+				callback(lineLeft + lineWidth - widthLeft, top += lineHeight);
+			}
 			if (lineElided) {
 				return withElided(true);
 			}
-			lineHeight = 0;
-			last_rBearing = 0;// b->f_rbearing(); (0 for newline)
-			last_rPadding = 0;// b->f_rpadding(); (0 for newline)
 
-			initNextParagraph(i + 1, index);
+			last_rBearing = 0;// b->f_rbearing(); (0 for newline)
+			last_rPadding = w->f_rpadding();
+
+			initNextParagraph(index);
 			longWordLine = true;
+			lastWordStart = w;
+			lastWordStart_wLeft = widthLeft;
+			continue;
+		} else if (!qlinesleft) {
 			continue;
 		}
-		auto b__f_rbearing = b->f_rbearing();
-		auto newWidthLeft = widthLeft - last_rBearing - (last_rPadding + b->f_width() - b__f_rbearing);
+		const auto wordEndsHere = !w->unfinished();
+
+		auto w__f_width = w->f_width();
+		const auto w__f_rbearing = w->f_rbearing();
+		const auto newWidthLeft = widthLeft
+			- last_rBearing
+			- (last_rPadding + w__f_width - w__f_rbearing);
 		if (newWidthLeft >= 0) {
-			last_rBearing = b__f_rbearing;
-			last_rPadding = b->f_rpadding();
+			last_rBearing = w__f_rbearing;
+			last_rPadding = w->f_rpadding();
 			widthLeft = newWidthLeft;
 
-			lineHeight = qMax(lineHeight, blockHeight);
-
-			longWordLine = false;
-			continue;
-		}
-
-		if (_btype == TextBlockType::Text) {
-			const auto t = &b.unsafe<TextBlock>();
-			if (t->_words.isEmpty()) { // no words in this block, spaces only => layout this block in the same line
-				last_rPadding += b->f_rpadding();
-
-				lineHeight = qMax(lineHeight, blockHeight);
-
+			if (wordEndsHere) {
 				longWordLine = false;
-				continue;
 			}
-
-			auto f_wLeft = widthLeft;
-			int f_lineHeight = lineHeight;
-			for (auto j = t->_words.cbegin(), e = t->_words.cend(), f = j; j != e; ++j) {
-				bool wordEndsHere = (j->f_width() >= 0);
-				auto j_width = wordEndsHere ? j->f_width() : -j->f_width();
-
-				auto newWidthLeft = widthLeft - last_rBearing - (last_rPadding + j_width - j->f_rbearing());
-				if (newWidthLeft >= 0) {
-					last_rBearing = j->f_rbearing();
-					last_rPadding = j->f_rpadding();
-					widthLeft = newWidthLeft;
-
-					lineHeight = qMax(lineHeight, blockHeight);
-
-					if (wordEndsHere) {
-						longWordLine = false;
-					}
-					if (wordEndsHere || longWordLine) {
-						f_wLeft = widthLeft;
-						f_lineHeight = lineHeight;
-						f = j + 1;
-					}
-					continue;
-				}
-
-				if (lineElided) {
-					lineHeight = qMax(lineHeight, blockHeight);
-				} else if (f != j && !geometry.breakEverywhere) {
-					j = f;
-					widthLeft = f_wLeft;
-					lineHeight = f_lineHeight;
-					j_width = (j->f_width() >= 0) ? j->f_width() : -j->f_width();
-				}
-
-				callback(lineLeft + lineWidth - widthLeft, top += lineHeight);
-				if (lineElided) {
-					return withElided(true);
-				}
-
-				lineHeight = qMax(0, blockHeight);
-
-				initNextLine();
-
-				last_rBearing = j->f_rbearing();
-				last_rPadding = j->f_rpadding();
-				widthLeft -= j_width - last_rBearing;
-
-				longWordLine = !wordEndsHere;
-				f = j + 1;
-				f_wLeft = widthLeft;
-				f_lineHeight = lineHeight;
+			if (wordEndsHere || longWordLine) {
+				lastWordStart_wLeft = widthLeft;
+				lastWordStart = w + 1;
 			}
 			continue;
 		}
 
 		if (lineElided) {
-			lineHeight = qMax(lineHeight, blockHeight);
+		} else if (w != lastWordStart && !geometry.breakEverywhere) {
+			w = lastWordStart;
+			widthLeft = lastWordStart_wLeft;
+			w__f_width = w->f_width();
+		}
+
+		if (qlinesleft > 0) {
+			--qlinesleft;
 		}
 		callback(lineLeft + lineWidth - widthLeft, top += lineHeight);
 		if (lineElided) {
 			return withElided(true);
 		}
 
-		lineHeight = qMax(0, blockHeight);
 		initNextLine();
 
-		last_rBearing = b__f_rbearing;
-		last_rPadding = b->f_rpadding();
-		widthLeft -= b->f_width() - last_rBearing;
+		last_rBearing = w->f_rbearing();
+		last_rPadding = w->f_rpadding();
+		widthLeft -= w__f_width - last_rBearing;
 
-		longWordLine = true;
-		continue;
+		longWordLine = !wordEndsHere;
+		lastWordStart = w + 1;
+		lastWordStart_wLeft = widthLeft;
 	}
 	if (widthLeft < lineWidth) {
+		const auto useSkipHeight = (_blocks.back()->type() == TextBlockType::Skip)
+			&& (widthLeft + _words.back().f_width() == lineWidth);
+		const auto useLineHeight = useSkipHeight
+			? _blocks.back().unsafe<SkipBlock>().height()
+			: lineHeight;
 		callback(
 			lineLeft + lineWidth - widthLeft,
-			top + lineHeight + qpadding.bottom());
+			top + useLineHeight + qpadding.bottom());
 	}
 	return withElided(false);
 }
@@ -1118,8 +1178,8 @@ void String::draw(Painter &p, int32 left, int32 top, int32 w, style::align align
 			: QRect()),
 		.palette = &p.textPalette(),
 		.paused = p.inactive(),
-		.selection = selection,
 		.fullWidthSelection = fullWidthSelection,
+		.selection = selection,
 	});
 }
 
@@ -1277,23 +1337,53 @@ not_null<ExtendedData*> String::ensureExtended() {
 	return _extended.get();
 }
 
-uint16 String::countBlockEnd(
-		const TextBlocks::const_iterator &i,
-		const TextBlocks::const_iterator &e) const {
-	return (i + 1 == e) ? _text.size() : (*(i + 1))->position();
+not_null<QuotesData*> String::ensureQuotes() {
+	const auto extended = ensureExtended();
+	if (!extended->quotes) {
+		extended->quotes = std::make_unique<QuotesData>();
+	}
+	return extended->quotes.get();
 }
 
-uint16 String::countBlockLength(
-		const TextBlocks::const_iterator &i,
-		const TextBlocks::const_iterator &e) const {
-	return countBlockEnd(i, e) - (*i)->position();
+uint16 String::blockPosition(
+		std::vector<Block>::const_iterator i,
+		int fullLengthOverride) const {
+	return (i != end(_blocks))
+		? CountPosition(i)
+		: (fullLengthOverride >= 0)
+		? uint16(fullLengthOverride)
+		: uint16(_text.size());
+}
+
+uint16 String::blockEnd(
+		std::vector<Block>::const_iterator i,
+		int fullLengthOverride) const {
+	return (i != end(_blocks) && i + 1 != end(_blocks))
+		? CountPosition(i + 1)
+		: (fullLengthOverride >= 0)
+		? uint16(fullLengthOverride)
+		: uint16(_text.size());
+}
+
+uint16 String::blockLength(
+		std::vector<Block>::const_iterator i,
+		int fullLengthOverride) const {
+	return (i == end(_blocks))
+		? 0
+		: (i + 1 != end(_blocks))
+		? (CountPosition(i + 1) - CountPosition(i))
+		: (fullLengthOverride >= 0)
+		? (fullLengthOverride - CountPosition(i))
+		: (int(_text.size()) - CountPosition(i));
 }
 
 QuoteDetails *String::quoteByIndex(int index) const {
 	Expects(!index
-		|| (_extended && index <= _extended->quotes.size()));
+		|| (_extended
+			&& _extended->quotes
+			&& index <= _extended->quotes->list.size()));
 
-	return index ? &_extended->quotes[index - 1] : nullptr;
+	return index ? &_extended->quotes->list[index - 1] : nullptr;
 }
 
 int String::quoteIndex(const AbstractBlock *block) const {
@@ -1357,6 +1447,12 @@ const QString &String::quoteHeaderText(QuoteDetails *quote) const {
 		: quote->language.isEmpty()
 		? kDefaultHeader
 		: quote->language;
+}
+
+int String::quoteLinesLimit(QuoteDetails *quote) const {
+	return (quote && quote->collapsed && !quote->expanded)
+		? kQuoteCollapsedLines
+		: -1;
 }
 
 template <
@@ -1458,10 +1554,10 @@ void String::enumerateText(
 		auto rangeFrom = qMax(selection.from, blockPosition);
 		auto rangeTo = qMin(
 			selection.to,
-			uint16(blockPosition + countBlockLength(i, e)));
+			uint16(blockPosition + blockLength(i)));
 		if (rangeTo > rangeFrom) {
 			const auto customEmojiData = (blockType == TextBlockType::CustomEmoji)
-				? static_cast<const CustomEmojiBlock*>(i->get())->_custom->entityData()
+				? static_cast<const CustomEmojiBlock*>(i->get())->custom()->entityData()
 				: QString();
 			appendPartCallback(
 				base::StringViewMid(_text, rangeFrom, rangeTo - rangeFrom),
@@ -1479,7 +1575,7 @@ void String::unloadPersistentAnimation() {
 		for (const auto &block : _blocks) {
 			const auto raw = block.get();
 			if (raw->type() == TextBlockType::CustomEmoji) {
-				static_cast<const CustomEmojiBlock*>(raw)->_custom->unload();
+				static_cast<const CustomEmojiBlock*>(raw)->custom()->unload();
 			}
 		}
 	}
@@ -1500,7 +1596,7 @@ OnlyCustomEmoji String::toOnlyCustomEmoji() const {
 		if (raw->type() == TextBlockType::CustomEmoji) {
 			const auto custom = static_cast<const CustomEmojiBlock*>(raw);
 			result.lines.back().push_back({
-				.entityData = custom->_custom->entityData(),
+				.entityData = custom->custom()->entityData(),
 			});
 		} else if (raw->type() == TextBlockType::Newline) {
 			result.lines.emplace_back();
@@ -1555,37 +1651,52 @@ TextForMimeData String::toText(
 		}
 		result.rich.entities.insert(i, std::move(entity));
 	};
+	using Flag = TextBlockFlag;
+	using Flags = TextBlockFlags;
 	auto linkStart = 0;
 	auto markdownTrackers = composeEntities
 		? std::vector<MarkdownTagTracker>{
-			{ TextBlockFlag::Italic, EntityType::Italic },
-			{ TextBlockFlag::Bold, EntityType::Bold },
-			{ TextBlockFlag::Semibold, EntityType::Semibold },
-			{ TextBlockFlag::Underline, EntityType::Underline },
-			{ TextBlockFlag::Spoiler, EntityType::Spoiler },
-			{ TextBlockFlag::StrikeOut, EntityType::StrikeOut },
-			{ TextBlockFlag::Code, EntityType::Code }, // #TODO entities
-			{ TextBlockFlag::Pre, EntityType::Pre },
-			{ TextBlockFlag::Blockquote, EntityType::Blockquote },
+			{ Flag::Italic, EntityType::Italic },
+			{ Flag::Bold, EntityType::Bold },
+			{ Flag::Semibold, EntityType::Semibold },
+			{ Flag::Underline, EntityType::Underline },
+			{ Flag::Spoiler, EntityType::Spoiler },
+			{ Flag::StrikeOut, EntityType::StrikeOut },
+			{ Flag::Code, EntityType::Code },
+			{ Flag::Pre, EntityType::Pre },
+			{ Flag::Blockquote, EntityType::Blockquote },
 		} : std::vector<MarkdownTagTracker>();
 	const auto flagsChangeCallback = [&](
-			TextBlockFlags oldFlags,
+			Flags oldFlags,
 			int oldQuoteIndex,
-			TextBlockFlags newFlags,
+			Flags newFlags,
 			int newQuoteIndex) {
 		if (!composeEntities) {
 			return;
 		}
 		for (auto &tracker : markdownTrackers) {
 			const auto flag = tracker.flag;
-			const auto quoteWithLanguage = (flag == TextBlockFlag::Pre);
-			const auto quoteWithLanguageChanged = quoteWithLanguage
+			const auto quoteWithCollapseChanged = (flag == Flag::Blockquote)
+				&& (oldFlags & flag)
+				&& (newFlags & flag)
 				&& (oldQuoteIndex != newQuoteIndex);
-			const auto data = (quoteWithLanguage && oldQuoteIndex)
-				? _extended->quotes[oldQuoteIndex - 1].language
+			const auto quoteWithLanguageChanged = (flag == Flag::Pre)
+				&& (oldFlags & flag)
+				&& (newFlags & flag)
+				&& (oldQuoteIndex != newQuoteIndex);
+			const auto quote = !oldQuoteIndex
+				? nullptr
+				: &_extended->quotes->list[oldQuoteIndex - 1];
+			const auto data = !quote
+				? QString()
+				: quote->pre
+				? quote->language
+				: quote->blockquote
+				? (quote->collapsed ? u"1"_q : QString())
 				: QString();
 			if (((oldFlags & flag) && !(newFlags & flag))
-				|| quoteWithLanguageChanged) {
+				|| quoteWithLanguageChanged
+				|| quoteWithCollapseChanged) {
 				insertEntity({
 					tracker.type,
 					tracker.start,
@@ -1594,7 +1705,8 @@ TextForMimeData String::toText(
 				});
 			}
 			if (((newFlags & flag) && !(oldFlags & flag))
-				|| quoteWithLanguageChanged) {
+				|| quoteWithLanguageChanged
+				|| quoteWithCollapseChanged) {
 				tracker.start = result.rich.text.size();
 			}
 		}
@@ -1612,7 +1724,8 @@ TextForMimeData String::toText(
 		// This logic is duplicated in TextForMimeData::WithExpandedLinks.
 		const auto entity = handler->getTextEntity();
 		const auto plainUrl = (entity.type == EntityType::Url)
-			|| (entity.type == EntityType::Email);
+			|| (entity.type == EntityType::Email)
+			|| (entity.type == EntityType::Phone);
 		const auto full = plainUrl
 			? QStringView(entity.data).mid(0, entity.data.size())
 			: inText;
@@ -1704,15 +1817,19 @@ IsolatedEmoji String::toIsolatedEmoji() const {
 		if (block->linkIndex()) {
 			return {};
 		} else if (type == TextBlockType::Emoji) {
-			result.items[index++] = block.unsafe<EmojiBlock>()._emoji;
+			result.items[index++] = block.unsafe<EmojiBlock>().emoji();
 		} else if (type == TextBlockType::CustomEmoji) {
 			result.items[index++]
-				= block.unsafe<CustomEmojiBlock>()._custom->entityData();
+				= block.unsafe<CustomEmojiBlock>().custom()->entityData();
 		} else if (type != TextBlockType::Skip) {
 			return {};
 		}
 	}
 	return result;
+}
+
+int String::lineHeight() const {
+	return _st->lineHeight ? _st->lineHeight : _st->font->height;
 }
 
 void String::clear() {
@@ -1726,13 +1843,13 @@ void String::clear() {
 }
 
 bool IsBad(QChar ch) {
-	return (ch == 0)
-		|| (ch >= 8232 && ch < 8237)
-		|| (ch >= 65024 && ch < 65040 && ch != 65039)
-		|| (ch >= 127 && ch < 160 && ch != 156)
+	return (ch.unicode() == 0)
+		|| (ch.unicode() >= 8232 && ch.unicode() < 8237)
+		|| (ch.unicode() >= 65024 && ch.unicode() < 65040 && ch.unicode() != 65039)
+		|| (ch.unicode() >= 127 && ch.unicode() < 160 && ch.unicode() != 156)
 
 		// qt harfbuzz crash see https://github.com/telegramdesktop/tdesktop/issues/4551
-		|| (Platform::IsMac() && ch == 6158);
+		|| (Platform::IsMac() && ch.unicode() == 6158);
 }
 
 bool IsWordSeparator(QChar ch) {
@@ -1802,12 +1919,12 @@ bool IsLinkEnd(QChar ch) {
 
 bool IsNewline(QChar ch) {
 	return (ch == QChar::LineFeed)
-		|| (ch == 156);
+		|| (ch.unicode() == 156);
 }
 
 bool IsSpace(QChar ch) {
 	return ch.isSpace()
-		|| (ch < 32)
+		|| (ch.unicode() < 32)
 		|| (ch == QChar::ParagraphSeparator)
 		|| (ch == QChar::LineSeparator)
 		|| (ch == QChar::ObjectReplacementCharacter)
@@ -1817,8 +1934,8 @@ bool IsSpace(QChar ch) {
 
 bool IsDiacritic(QChar ch) { // diacritic and variation selectors
 	return (ch.category() == QChar::Mark_NonSpacing)
-		|| (ch == 1652)
-		|| (ch >= 64606 && ch <= 64611);
+		|| (ch.unicode() == 1652)
+		|| (ch.unicode() >= 64606 && ch.unicode() <= 64611);
 }
 
 bool IsReplacedBySpace(QChar ch) {
@@ -1830,13 +1947,13 @@ bool IsReplacedBySpace(QChar ch) {
 	// \xcc[\xb3\xbf\x8a] // 819, 831, 778
 	// QString bad1 = QString::fromUtf8("\xcc\xb3"), bad2 = QString::fromUtf8("\xcc\xbf"), bad3 = QString::fromUtf8("\xcc\x8a");
 	// [\x00\x01\x02\x07\x08\x0b-\x1f] // '\t' = 0x09
-	return (/*code >= 0x00 && */ch <= 0x02)
-		|| (ch >= 0x07 && ch <= 0x09)
-		|| (ch >= 0x0b && ch <= 0x1f)
-		|| (ch == 819)
-		|| (ch == 831)
-		|| (ch == 778)
-		|| (ch >= 8232 && ch <= 8237);
+	return (/*code >= 0x00 && */ch.unicode() <= 0x02)
+		|| (ch.unicode() >= 0x07 && ch.unicode() <= 0x09)
+		|| (ch.unicode() >= 0x0b && ch.unicode() <= 0x1f)
+		|| (ch.unicode() == 819)
+		|| (ch.unicode() == 831)
+		|| (ch.unicode() == 778)
+		|| (ch.unicode() >= 8232 && ch.unicode() <= 8237);
 }
 
 bool IsTrimmed(QChar ch) {

@@ -8,6 +8,9 @@
 
 #include "ui/platform/mac/ui_window_title_mac.h"
 #include "ui/widgets/rp_window.h"
+#include "ui/qt_object_factory.h"
+#include "ui/qt_weak_factory.h"
+#include "ui/ui_utility.h"
 #include "base/qt/qt_common_adapters.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/palette.h"
@@ -99,7 +102,7 @@ public:
 	bool nativeEventFilter(
 			const QByteArray &eventType,
 			void *message,
-			base::NativeEventResult *result) {
+			native_event_filter_result *result) {
 		if (NSEvent *e = static_cast<NSEvent*>(message)) {
 			if ([e type] == NSEventTypeLeftMouseDown) {
 				_dragStarted = _checkStartDrag();
@@ -398,7 +401,7 @@ void WindowHelper::setStaysOnTop(bool enabled) {
 }
 
 void WindowHelper::setGeometry(QRect rect) {
-	window()->setGeometry(rect.marginsAdded(frameMargins()));
+	SetGeometryAndScreen(window(), rect.marginsAdded(frameMargins()));
 }
 
 void WindowHelper::setupBodyTitleAreaEvents() {

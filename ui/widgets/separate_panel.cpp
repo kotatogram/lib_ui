@@ -6,13 +6,14 @@
 //
 #include "ui/widgets/separate_panel.h"
 
+#include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/widgets/popup_menu.h"
-#include "ui/widgets/menu/menu_add_action_callback.h"
-#include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/platform/ui_platform_utility.h"
@@ -22,8 +23,12 @@
 #include "ui/style/style_core_palette.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
+#include "ui/qt_object_factory.h"
+#include "ui/qt_weak_factory.h"
+#include "ui/ui_utility.h"
 #include "base/platform/base_platform_info.h"
 #include "base/debug_log.h"
+#include "base/invoke_queued.h"
 #include "styles/style_widgets.h"
 #include "styles/style_layers.h"
 #include "styles/palette.h"
@@ -139,6 +144,175 @@ PanelShow::operator bool() const {
 
 } // namespace
 
+class SeparatePanel::ResizeEdge final : public RpWidget {
+public:
+	ResizeEdge(not_null<QWidget*> parent, Qt::Edges edges);
+
+	void updateSize();
+	void setParentPadding(QMargins padding);
+
+private:
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void updateFromResize(QPoint delta);
+
+	const Qt::Edges _edges;
+	QMargins _extent;
+	QRect _startGeometry;
+	QPoint _startPosition;
+	bool _press = false;
+	bool _resizing = false;
+
+};
+
+SeparatePanel::ResizeEdge::ResizeEdge(
+	not_null<QWidget*> parent,
+	Qt::Edges edges)
+: RpWidget(parent)
+, _edges(edges) {
+	show();
+	setCursor([&] {
+		if ((_edges == (Qt::LeftEdge | Qt::TopEdge))
+			|| (_edges == (Qt::RightEdge | Qt::BottomEdge))) {
+			return Qt::SizeFDiagCursor;
+		} else if (_edges == Qt::TopEdge || _edges == Qt::BottomEdge) {
+			return Qt::SizeVerCursor;
+		} else if ((_edges == (Qt::RightEdge | Qt::TopEdge))
+			|| (_edges == (Qt::LeftEdge | Qt::BottomEdge))) {
+			return Qt::SizeBDiagCursor;
+		} else if (_edges == Qt::RightEdge || _edges == Qt::LeftEdge) {
+			return Qt::SizeHorCursor;
+		} else {
+			Unexpected("Bad edges in SeparatePanel::ResizeEdge.");
+		}
+	}());
+}
+
+void SeparatePanel::ResizeEdge::updateSize() {
+	const auto parent = parentWidget()->rect();
+	if ((_extent.left() + _extent.right() >= parent.width())
+		|| (_extent.top() + _extent.bottom() >= parent.height())) {
+		return;
+	}
+	if (_edges == (Qt::LeftEdge | Qt::TopEdge)) {
+		setGeometry(0, 0, _extent.left(), _extent.top());
+	} else if (_edges == Qt::TopEdge) {
+		setGeometry(
+			_extent.left(),
+			0,
+			parent.width() - _extent.left() - _extent.right(),
+			_extent.top());
+	} else if (_edges == (Qt::RightEdge | Qt::TopEdge)) {
+		setGeometry(
+			parent.width() - _extent.right(),
+			0,
+			_extent.right(),
+			_extent.top());
+	} else if (_edges == Qt::RightEdge) {
+		setGeometry(
+			parent.width() - _extent.right(),
+			_extent.top(),
+			_extent.right(),
+			parent.height() - _extent.top() - _extent.bottom());
+	} else if (_edges == (Qt::RightEdge | Qt::BottomEdge)) {
+		setGeometry(
+			parent.width() - _extent.right(),
+			parent.height() - _extent.bottom(),
+			_extent.right(),
+			_extent.bottom());
+	} else if (_edges == Qt::BottomEdge) {
+		setGeometry(
+			_extent.left(),
+			parent.height() - _extent.bottom(),
+			parent.width() - _extent.left() - _extent.right(),
+			_extent.bottom());
+	} else if (_edges == (Qt::LeftEdge | Qt::BottomEdge)) {
+		setGeometry(
+			0,
+			parent.height() - _extent.bottom(),
+			_extent.left(),
+			_extent.bottom());
+	} else if (_edges == Qt::LeftEdge) {
+		setGeometry(
+			0,
+			_extent.top(),
+			_extent.left(),
+			parent.height() - _extent.top() - _extent.bottom());
+	} else {
+		Unexpected("Corrupt edges in SeparatePanel::ResizeEdge.");
+	}
+}
+
+void SeparatePanel::ResizeEdge::setParentPadding(QMargins padding) {
+	if (_extent != padding) {
+		_extent = padding;
+		updateSize();
+	}
+}
+
+void SeparatePanel::ResizeEdge::mousePressEvent(QMouseEvent *e) {
+	if (e->button() == Qt::LeftButton) {
+		_press = true;
+		_startPosition = e->globalPos();
+		_startGeometry = window()->geometry();
+	}
+}
+
+void SeparatePanel::ResizeEdge::mouseReleaseEvent(QMouseEvent *e) {
+	if (e->button() == Qt::LeftButton) {
+		_press = false;
+		_resizing = false;
+	}
+}
+
+void SeparatePanel::ResizeEdge::mouseMoveEvent(QMouseEvent *e) {
+	if (base::take(_press)) {
+		if (const auto handle = window()->windowHandle()) {
+			if (!handle->startSystemResize(_edges)) {
+				_resizing = true;
+			}
+		}
+	}
+	if (_resizing) {
+		updateFromResize(e->globalPos() - _startPosition);
+	}
+}
+
+void SeparatePanel::ResizeEdge::updateFromResize(QPoint delta) {
+	auto geometry = _startGeometry;
+	const auto min = window()->minimumSize();
+	const auto minw = std::max(min.width(), 80);
+	const auto minh = std::max(min.height(), 40);
+	const auto updateLeft = [&](int left) {
+		geometry.setX(std::min(
+			left,
+			geometry.x() + geometry.width() - minw));
+	};
+	const auto updateRight = [&](int right) {
+		geometry.setWidth(std::max(right - geometry.x(), minw));
+	};
+	const auto updateTop = [&](int top) {
+		geometry.setY(std::min(
+			top,
+			geometry.y() + geometry.height() - minh));
+	};
+	const auto updateBottom = [&](int bottom) {
+		geometry.setHeight(std::max(bottom - geometry.y(), minh));
+	};
+	if (_edges & Qt::LeftEdge) {
+		updateLeft(geometry.x() + delta.x());
+	} else if (_edges & Qt::RightEdge) {
+		updateRight(geometry.x() + geometry.width() + delta.x());
+	}
+	if (_edges & Qt::TopEdge) {
+		updateTop(geometry.y() + delta.y());
+	} else if (_edges & Qt::BottomEdge) {
+		updateBottom(geometry.y() + geometry.height() + delta.y());
+	}
+	window()->setGeometry(geometry);
+}
+
 SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 : RpWidget(args.parent)
 , _close(this, st::separatePanelClose)
@@ -149,6 +323,14 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 	setWindowIcon(QGuiApplication::windowIcon());
 	initControls();
 	initLayout(args);
+
+	shownValue() | rpl::filter([=](bool shown) {
+		return shown;
+	}) | rpl::start_with_next([=] {
+		Platform::SetWindowMargins(this, _useTransparency
+			? _padding
+			: QMargins());
+	}, lifetime());
 }
 
 SeparatePanel::~SeparatePanel() = default;
@@ -163,6 +345,14 @@ void SeparatePanel::setTitle(rpl::producer<QString> title) {
 
 void SeparatePanel::setTitleHeight(int height) {
 	_titleHeight = height;
+	updateControlsGeometry();
+}
+
+void SeparatePanel::setTitleBadge(object_ptr<RpWidget> badge) {
+	if (badge) {
+		badge->setParent(this);
+	}
+	_titleBadge = std::move(badge);
 	updateControlsGeometry();
 }
 
@@ -237,8 +427,19 @@ void SeparatePanel::overrideTitleColor(std::optional<QColor> color) {
 	update();
 }
 
+void SeparatePanel::overrideBottomBarColor(std::optional<QColor> color) {
+	if (_bottomBarOverrideColor == color) {
+		return;
+	}
+	_bottomBarOverrideColor = color;
+	_bottomBarOverrideBorderParts = _bottomBarOverrideColor
+		? createBorderImage(*_bottomBarOverrideColor)
+		: QPixmap();
+	update();
+}
+
 void SeparatePanel::updateTitleGeometry(int newWidth) const {
-	if (!_title) {
+	if (!_title && !_searchWrap) {
 		return;
 	}
 	const auto progress = _titleLeft.value(_back->toggled() ? 1. : 0.);
@@ -246,26 +447,63 @@ void SeparatePanel::updateTitleGeometry(int newWidth) const {
 		st::separatePanelTitleLeft,
 		_back->width() + st::separatePanelTitleSkip,
 		progress);
-	_title->resizeToWidth(newWidth
+	const auto available = newWidth
 		- rect::m::sum::h(_padding)
 		- left
-		- _close->width()
-		- (_menuToggle ? _menuToggle->width() : 0));
-	_title->moveToLeft(
-		_padding.left() + left,
-		_padding.top() + st::separatePanelTitleTop);
+		- _close->width();
+	if (_title) {
+		_title->resizeToWidth(
+			std::min(
+				available
+					- (_menuToggle ? _menuToggle->width() : 0)
+					- (_searchToggle ? _searchToggle->width() : 0)
+					- (_titleBadge ? _titleBadge->width() : 0),
+				_title->textMaxWidth()));
+		_title->moveToLeft(
+			_padding.left() + left,
+			_padding.top() + st::separatePanelTitleTop);
+		if (_titleBadge) {
+			_titleBadge->moveToLeft(
+				_title->x() + _title->width(),
+				_title->y() + (_title->height() - _titleBadge->height()) / 2);
+		}
+	}
+	if (_searchWrap) {
+		_searchWrap->entity()->resize(available, _close->height());
+		_searchWrap->move(_padding.left() + left, _padding.top());
+		if (_searchField) {
+			_searchField->resizeToWidth(available);
+			_searchField->move(
+				0,
+				(_close->height() - _searchField->height()) / 2);
+		}
+	}
 }
 
-rpl::producer<> SeparatePanel::backRequests() const {
+rpl::producer<> SeparatePanel::allBackRequests() const {
 	return rpl::merge(
 		_back->entity()->clicks() | rpl::to_empty,
 		_synteticBackRequests.events());
 }
 
-rpl::producer<> SeparatePanel::closeRequests() const {
+rpl::producer<> SeparatePanel::backRequests() const {
+	return allBackRequests(
+	) | rpl::filter([=] {
+		return !_searchField;
+	});
+}
+
+rpl::producer<> SeparatePanel::allCloseRequests() const {
 	return rpl::merge(
 		_close->clicks() | rpl::to_empty,
 		_userCloseRequests.events());
+}
+
+rpl::producer<> SeparatePanel::closeRequests() const {
+	return allCloseRequests(
+	) | rpl::filter([=] {
+		return !_searchField;
+	});
 }
 
 rpl::producer<> SeparatePanel::closeEvents() const {
@@ -273,8 +511,14 @@ rpl::producer<> SeparatePanel::closeEvents() const {
 }
 
 void SeparatePanel::setBackAllowed(bool allowed) {
-	if (allowed != _back->toggled()) {
-		_back->toggle(allowed, anim::type::normal);
+	_backAllowed = allowed;
+	updateBackToggled();
+}
+
+void SeparatePanel::updateBackToggled() {
+	const auto toggled = _backAllowed || (_searchField != nullptr);
+	if (_back->toggled() != toggled) {
+		_back->toggle(toggled, anim::type::normal);
 	}
 }
 
@@ -292,6 +536,128 @@ void SeparatePanel::setMenuAllowed(
 			_padding.top());
 	}, _menuToggle->lifetime());
 	updateTitleGeometry(width());
+}
+
+void SeparatePanel::setSearchAllowed(
+		rpl::producer<QString> placeholder,
+		Fn<void(std::optional<QString>)> queryChanged) {
+	_searchPlaceholder = std::move(placeholder);
+	_searchQueryChanged = std::move(queryChanged);
+	_searchToggle.create(
+		this,
+		object_ptr<IconButton>(this, st::separatePanelSearch));
+	const auto button = _searchToggle->entity();
+	updateTitleButtonColors(button);
+	_searchToggle->show(anim::type::instant);
+	button->setClickedCallback([=] { toggleSearch(true); });
+
+	widthValue(
+	) | rpl::start_with_next([=](int width) {
+		_searchToggle->moveToRight(
+			_padding.right() + _close->width(),
+			_padding.top());
+	}, _searchToggle->lifetime());
+	updateTitleGeometry(width());
+}
+
+bool SeparatePanel::closeSearch() {
+	if (!_searchField) {
+		return false;
+	}
+	toggleSearch(false);
+	return true;
+}
+
+void SeparatePanel::toggleSearch(bool shown) {
+	const auto weak = Ui::MakeWeak(this);
+	if (shown) {
+		if (_searchWrap && _searchWrap->toggled()) {
+			return;
+		}
+		_searchWrap.create(this, object_ptr<RpWidget>(this));
+		const auto inner = _searchWrap->entity();
+		inner->paintRequest() | rpl::start_with_next([=](QRect clip) {
+			QPainter(inner).fillRect(clip, st::windowBg);
+		}, inner->lifetime());
+		_searchField = CreateChild<InputField>(
+			inner,
+			st::defaultMultiSelectSearchField,
+			InputField::Mode::SingleLine,
+			_searchPlaceholder.value());
+		_searchField->show();
+		_searchField->setFocusFast();
+
+		const auto field = _searchField;
+		field->changes() | rpl::filter([=] {
+			return (_searchField == field);
+		}) | rpl::start_with_next([=] {
+			if (const auto onstack = _searchQueryChanged) {
+				onstack(field->getLastText());
+			}
+		}, field->lifetime());
+
+		rpl::merge(
+			allBackRequests(),
+			allCloseRequests()
+		) | rpl::filter([=] {
+			return (_searchField == field);
+		}) | rpl::start_with_next([=] {
+			toggleSearch(false);
+		}, field->lifetime());
+
+		if (const auto onstack = _searchQueryChanged) {
+			onstack(QString());
+			if (!weak) {
+				return;
+			}
+		}
+
+		updateTitleGeometry(width());
+		_searchWrap->show(anim::type::normal);
+		updateBackToggled();
+
+		inner->shownValue(
+		) | rpl::filter([=](bool active) {
+			return active && (_searchField == field);
+		}) | rpl::take(1) | rpl::start_with_next([=] {
+			InvokeQueued(field, [=] {
+				if (_searchField == field && window()->isActiveWindow()) {
+					// In case focus is somewhat in a native child window,
+					// like a webview, Qt glitches here with field showing
+					// focused state, but not receiving any keyboard input:
+					//
+					// window()->windowHandle()->isActive() == false.
+					//
+					// Steps were: SeparatePanel with a WebView2 child,
+					// some interaction with mouse inside the WebView2,
+					// so that WebView2 gets focus and active window state,
+					// then we call setSearchAllowed() and after animation
+					// is finished try typing -> nothing happens.
+					//
+					// With this workaround it works fine.
+					activateWindow();
+				}
+			});
+		}, inner->lifetime());
+
+		_searchWrap->shownValue(
+		) | rpl::filter(
+			!rpl::mappers::_1
+		) | rpl::start_with_next([=] {
+			_searchWrap.destroy();
+		}, _searchWrap->lifetime());
+	} else if (_searchField) {
+		_searchField = nullptr;
+		if (const auto onstack = _searchQueryChanged) {
+			onstack(std::nullopt);
+			if (!weak) {
+				return;
+			}
+		}
+
+		_searchWrap->hide(anim::type::normal);
+		updateBackToggled();
+	}
 }
 
 void SeparatePanel::showMenu(Fn<void(const Menu::MenuCallback&)> fill) {
@@ -360,7 +726,13 @@ void SeparatePanel::showAndActivate() {
 void SeparatePanel::keyPressEvent(QKeyEvent *e) {
 	if (e->key() == Qt::Key_Escape) {
 		crl::on_main(this, [=] {
-			if (_back->toggled()) {
+			const auto searchQuery = _searchField
+				? _searchField->getLastText().trimmed()
+				: QString();
+			if (!searchQuery.isEmpty()) {
+				_searchField->clear();
+				_searchField->setFocus();
+			} else if (_back->toggled()) {
 				_synteticBackRequests.fire({});
 			} else {
 				_userCloseRequests.fire({});
@@ -616,9 +988,30 @@ void SeparatePanel::focusInEvent(QFocusEvent *e) {
 	});
 }
 
-void SeparatePanel::setInnerSize(QSize size) {
+void SeparatePanel::setInnerSize(QSize size, bool allowResize) {
 	Expects(!size.isEmpty());
 
+	if (_allowResize != allowResize) {
+		_allowResize = allowResize;
+		if (!_allowResize) {
+			_resizeEdges.clear();
+		} else if (_resizeEdges.empty()) {
+			const auto areas = std::array<Qt::Edges, 8>{ {
+				Qt::LeftEdge | Qt::TopEdge,
+				Qt::TopEdge,
+				Qt::RightEdge | Qt::TopEdge,
+				Qt::RightEdge,
+				Qt::RightEdge | Qt::BottomEdge,
+				Qt::BottomEdge,
+				Qt::LeftEdge | Qt::BottomEdge,
+				Qt::LeftEdge
+			} };
+			for (const auto area : areas) {
+				_resizeEdges.push_back(
+					std::make_unique<ResizeEdge>(this, area));
+			}
+		}
+	}
 	if (rect().isEmpty()) {
 		initGeometry(size);
 	} else {
@@ -669,32 +1062,40 @@ void SeparatePanel::initGeometry(QSize size) {
 			st::lineWidth,
 			st::lineWidth,
 			st::lineWidth);
+	for (const auto &edge : _resizeEdges) {
+		edge->setParentPadding(_padding);
+	}
+
 	setAttribute(Qt::WA_OpaquePaintEvent, !_useTransparency);
 	const auto rect = [&] {
 		const QRect initRect(QPoint(), size);
 		return initRect.translated(center - initRect.center()).marginsAdded(_padding);
 	}();
 	move(rect.topLeft());
-	setFixedSize(rect.size());
-	createWinId();
-	if (_useTransparency) {
-		Platform::SetWindowMargins(this, _padding);
+	if (_allowResize) {
+		setMinimumSize(rect.size());
 	} else {
-		Platform::UnsetWindowMargins(this);
+		setFixedSize(rect.size());
 	}
 	updateControlsGeometry();
 }
 
 void SeparatePanel::updateGeometry(QSize size) {
-	setFixedSize(
-		_padding.left() + size.width() + _padding.right(),
-		_padding.top() + size.height() + _padding.bottom());
+	size = QRect(QPoint(), size).marginsAdded(_padding).size();
+	if (_allowResize) {
+		setMinimumSize(size);
+	} else {
+		setFixedSize(size);
+	}
 	updateControlsGeometry();
 	update();
 }
 
 void SeparatePanel::resizeEvent(QResizeEvent *e) {
 	updateControlsGeometry();
+	for (const auto &edge : _resizeEdges) {
+		edge->updateSize();
+	}
 }
 
 void SeparatePanel::updateControlsGeometry() {
@@ -751,6 +1152,9 @@ void SeparatePanel::paintShadowBorder(QPainter &p) const {
 	const auto &header = _titleOverrideColor
 		? _titleOverrideBorderParts
 		: _borderParts;
+	const auto &bottomBar = _bottomBarOverrideColor
+		? _bottomBarOverrideBorderParts
+		: _borderParts;
 	const auto topleft = QRect(QPoint(0, 0), corner);
 	p.drawPixmap(QRect(0, 0, part1, part1), header, topleft);
 
@@ -768,13 +1172,13 @@ void SeparatePanel::paintShadowBorder(QPainter &p) const {
 	const auto bottomleft = QRect(QPoint(0, part2) * factor, corner);
 	p.drawPixmap(
 		QRect(0, height() - part1, part1, part1),
-		_borderParts,
+		bottomBar,
 		bottomleft);
 
 	const auto bottomright = QRect(QPoint(part2, part2) * factor, corner);
 	p.drawPixmap(
 		QRect(width() - part1, height() - part1, part1, part1),
-		_borderParts,
+		bottomBar,
 		bottomright);
 
 	const auto bottom = QRect(
@@ -786,7 +1190,7 @@ void SeparatePanel::paintShadowBorder(QPainter &p) const {
 			height() - _padding.bottom() - radius,
 			width() - 2 * part1,
 			_padding.bottom() + radius),
-		_borderParts,
+		bottomBar,
 		bottom);
 
 	const auto fillLeft = [&](int from, int till, const auto &parts) {

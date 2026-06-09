@@ -64,6 +64,9 @@ public:
 
 	virtual int manualRoundingRadius() const;
 	void setBodyTitleArea(Fn<WindowTitleHitTestFlags(QPoint)> testMethod);
+	[[nodiscard]] bool mousePressCancelled() const {
+		return _mousePressCancelled;
+	}
 
 	[[nodiscard]] virtual const style::TextStyle &titleTextStyle() const;
 
@@ -82,6 +85,7 @@ private:
 	const not_null<RpWidget*> _window;
 	Fn<WindowTitleHitTestFlags(QPoint)> _bodyTitleAreaTestMethod;
 	bool _mousePressed = false;
+	bool _mousePressCancelled = false;
 
 };
 
@@ -120,8 +124,11 @@ private:
 	std::array<QImage, 4> _sides;
 	std::array<QImage, 4> _corners;
 	object_ptr<RpWidget> _roundingOverlay = { nullptr };
-	bool _marginsSet = false;
 	rpl::variable<Qt::WindowStates> _windowState = Qt::WindowNoState;
+	QRect _lastGeometry;
+	std::optional<QSize> _minimumSize;
+	std::optional<QSize> _fixedSize;
+	bool _marginsSet = false;
 
 };
 

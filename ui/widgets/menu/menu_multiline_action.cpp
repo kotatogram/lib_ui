@@ -7,6 +7,7 @@
 #include "ui/widgets/menu/menu_multiline_action.h"
 
 #include "ui/widgets/labels.h"
+#include "ui/qt_object_factory.h"
 
 namespace Ui::Menu {
 
@@ -34,7 +35,8 @@ MultilineAction::MultilineAction(
 	parent->widthValue() | rpl::start_with_next([=](int width) {
 		const auto top = _labelPosition.y();
 		const auto skip = _labelPosition.x();
-		_text->resizeToWidth(width - 2 * skip);
+		const auto rightSkip = _icon ? _st.itemIconPosition.x() : skip;
+		_text->resizeToWidth(width - skip - rightSkip);
 		_text->moveToLeft(skip, top);
 		resize(width, contentHeight());
 	}, lifetime());
@@ -67,6 +69,7 @@ void MultilineAction::paintEvent(QPaintEvent *e) {
 
 void MultilineAction::updateMinWidth() {
 	const auto skip = _labelPosition.x();
+	const auto rightSkip = _icon ? _st.itemIconPosition.x() : skip;
 	auto min = _text->textMaxWidth() / 2;
 	auto max = _icon ? _st.widthMax : (_text->textMaxWidth() - skip);
 	_text->resizeToWidth(max);
@@ -86,7 +89,7 @@ void MultilineAction::updateMinWidth() {
 			}
 		}
 	}
-	ItemBase::setMinWidth(skip * 2 + max);
+	ItemBase::setMinWidth(skip + rightSkip + max);
 }
 
 } // namespace Ui::Menu

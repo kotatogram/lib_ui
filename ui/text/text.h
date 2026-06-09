@@ -76,12 +76,14 @@ static constexpr TextSelection AllTextSelection = { 0, 0xFFFF };
 
 namespace Ui::Text {
 
-class Block;
 class AbstractBlock;
+class Block;
+class Word;
 struct IsolatedEmoji;
 struct OnlyCustomEmoji;
 struct SpoilerData;
 struct QuoteDetails;
+struct QuotesData;
 struct ExtendedData;
 
 struct Modification {
@@ -168,8 +170,11 @@ constexpr auto kMaxQuoteOutlines = 3;
 struct QuotePaintCache {
 	QImage corners;
 	QImage outline;
+	QImage expand;
+	QImage collapse;
 	mutable QImage bottomCorner;
 	mutable QImage bottomRounding;
+	mutable QImage collapsedLine;
 
 	std::array<QColor, kMaxQuoteOutlines> outlinesCached;
 	QColor headerCached;
@@ -187,8 +192,10 @@ void ValidateQuotePaintCache(
 	const style::QuoteStyle &st);
 
 struct SkipBlockPaintParts {
-	uint32 skippedTop : 31 = 0;
+	uint32 skippedTop : 29 = 0;
 	uint32 skipBottom : 1 = 0;
+	uint32 expandIcon : 1 = 0;
+	uint32 collapseIcon : 1 = 0;
 };
 void FillQuotePaint(
 	QPainter &p,
@@ -222,8 +229,8 @@ struct PaintContext {
 	bool pausedEmoji = false;
 	bool pausedSpoiler = false;
 
-	TextSelection selection;
 	bool fullWidthSelection = true;
+	TextSelection selection;
 
 	HighlightInfoRequest *highlight = nullptr;
 
@@ -231,6 +238,9 @@ struct PaintContext {
 	int elisionLines = 0;
 	int elisionRemoveFromEnd = 0;
 	bool elisionBreakEverywhere = false;
+	// Elision middle works only with elisionLines = 1 and is very limited.
+	bool elisionMiddle = false;
+	bool useFullWidth = false; // !(width = min(availableWidth, maxWidth()))
 };
 
 class String {
@@ -292,6 +302,13 @@ public:
 	[[nodiscard]] bool hasSpoilers() const;
 	void setSpoilerRevealed(bool revealed, anim::type animated);
 	void setSpoilerLinkFilter(Fn<bool(const ClickContext&)> filter);
+
+	[[nodiscard]] bool hasCollapsedBlockquots() const;
+	[[nodiscard]] bool blockquoteCollapsed(int index) const;
+	[[nodiscard]] bool blockquoteExpanded(int index) const;
+	void setBlockquoteExpanded(int index, bool expanded);
+	void setBlockquoteExpandCallback(
+		Fn<void(int index, bool expanded)> callback);
 
 	[[nodiscard]] bool hasSkipBlock() const;
 	bool updateSkipBlock(int width, int height);
@@ -359,11 +376,11 @@ public:
 		return _st;
 	}
 
+	[[nodiscard]] int lineHeight() const;
+
 	void clear();
 
 private:
-	using TextBlocks = std::vector<Block>;
-
 	class ExtendedWrap : public std::unique_ptr<ExtendedData> {
 	public:
 		ExtendedWrap() noexcept;
@@ -382,13 +399,18 @@ private:
 	};
 
 	[[nodiscard]] not_null<ExtendedData*> ensureExtended();
+	[[nodiscard]] not_null<QuotesData*> ensureQuotes();
 
-	[[nodiscard]] uint16 countBlockEnd(
-		const TextBlocks::const_iterator &i,
-		const TextBlocks::const_iterator &e) const;
-	[[nodiscard]] uint16 countBlockLength(
-		const TextBlocks::const_iterator &i,
-		const TextBlocks::const_iterator &e) const;
+	[[nodiscard]] uint16 blockPosition(
+		std::vector<Block>::const_iterator i,
+		int fullLengthOverride = -1) const;
+	[[nodiscard]] uint16 blockEnd(
+		std::vector<Block>::const_iterator i,
+		int fullLengthOverride = -1) const;
+	[[nodiscard]] uint16 blockLength(
+		std::vector<Block>::const_iterator i,
+		int fullLengthOverride = -1) const;
+
 	[[nodiscard]] QuoteDetails *quoteByIndex(int index) const;
 	[[nodiscard]] const style::QuoteStyle &quoteStyle(
 		not_null<QuoteDetails*> quote) const;
@@ -396,7 +418,10 @@ private:
 	[[nodiscard]] int quoteMinWidth(QuoteDetails *quote) const;
 	[[nodiscard]] const QString &quoteHeaderText(QuoteDetails *quote) const;
 
-	// block must be either nullptr or a pointer to a NewlineBlock.
+	// Returns -1 in case there is no limit.
+	[[nodiscard]] int quoteLinesLimit(QuoteDetails *quote) const;
+
+	// Block must be either nullptr or a pointer to a NewlineBlock.
 	[[nodiscard]] int quoteIndex(const AbstractBlock *block) const;
 
 	// Template method for originalText(), originalTextWithEntities().
@@ -438,7 +463,8 @@ private:
 
 	const style::TextStyle *_st = nullptr;
 	QString _text;
-	TextBlocks _blocks;
+	std::vector<Block> _blocks;
+	std::vector<Word> _words;
 	ExtendedWrap _extended;
 
 	int _minResizeWidth = 0;
@@ -452,10 +478,13 @@ private:
 	bool _isOnlyCustomEmoji : 1 = false;
 	bool _hasNotEmojiAndSpaces : 1 = false;
 	bool _skipBlockAddedNewline : 1 = false;
-	bool _endsWithQuote : 1 = false;
+	bool _endsWithQuoteOrOtherDirection : 1 = false;
 
-	friend class Parser;
+	friend class BlockParser;
+	friend class WordParser;
 	friend class Renderer;
+	friend class BidiAlgorithm;
+	friend class StackEngine;
 
 };
 
