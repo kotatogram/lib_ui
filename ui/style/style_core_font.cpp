@@ -8,15 +8,19 @@
 
 #include "base/algorithm.h"
 #include "base/debug_log.h"
-#include "base/variant.h"
 #include "base/base_file_utilities.h"
 #include "ui/integration.h"
 #include "ui/style/style_core_scale.h"
 
 #include <QtCore/QMap>
 #include <QtCore/QVector>
+#include <QtCore/QDir>
 #include <QtGui/QFontInfo>
 #include <QtGui/QFontDatabase>
+
+#if __has_include(<glib.h>)
+#include <glib.h>
+#endif // __has_include(<glib.h>)
 
 void style_InitFontsResource() {
 #ifdef Q_OS_MAC // Use resources from the .app bundle on macOS.
@@ -37,6 +41,8 @@ void style_InitFontsResource() {
 
 namespace style {
 namespace {
+
+constexpr auto kSubSuperMultiplier = 0.75;
 
 QString Custom;
 CustomFontSettings CustomSettings;
@@ -72,19 +78,6 @@ ResolvedFont::ResolvedFont(FontResolveResult result, FontVariants *modified)
 
 namespace {
 
-#ifndef LIB_UI_USE_PACKAGED_FONTS
-const auto FontTypes = std::array{
-	u"OpenSans-Regular"_q,
-	u"OpenSans-Italic"_q,
-	u"OpenSans-SemiBold"_q,
-	u"OpenSans-SemiBoldItalic"_q,
-};
-const auto PersianFontTypes = std::array{
-	u"Vazirmatn-UI-NL-Regular"_q,
-	u"Vazirmatn-UI-NL-SemiBold"_q,
-};
-#endif // !LIB_UI_USE_PACKAGED_FONTS
-
 bool Started = false;
 
 base::flat_map<QString, int> FontFamilyIndices;
@@ -115,7 +108,6 @@ base::flat_map<uint64, uint32> QtFontsKeys;
 		| (uint64(font.pixelSize()));
 }
 
-#ifndef LIB_UI_USE_PACKAGED_FONTS
 bool LoadCustomFont(const QString &filePath) {
 	auto regularId = QFontDatabase::addApplicationFont(filePath);
 	if (regularId < 0) {
@@ -129,7 +121,6 @@ bool LoadCustomFont(const QString &filePath) {
 
 	return true;
 }
-#endif // !LIB_UI_USE_PACKAGED_FONTS
 
 bool TryFont(const QString &attempt) {
 	const auto resolved = QFontInfo(QFont(attempt)).family();
@@ -340,32 +331,36 @@ struct Metrics {
 		font.setFamily(family);
 	} else {
 		font.setFamily("Open Sans"_q);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-		font.setFeature("ss03", true);
-#endif // Qt >= 6.7.0
 	}
 	font.setPixelSize(size + ConvertScale(CustomSettings.fontSize));
 
 	const auto adjust = (overriden || system);
 	const auto metrics = ComputeMetrics(font, adjust);
-	font.setPixelSize(metrics.pixelSize);
 
-	font.setWeight((flags & (FontFlag::Bold | FontFlag::Semibold))
-		? QFont::DemiBold
-		: QFont::Normal);
-	if (font.bold()) {
-		const auto style = QFontInfo(font).styleName();
-		if (CustomSettings.semiboldIsBold
+	if (monospace || !(flags & FontFlag::SubOrSuper)) {
+		font.setPixelSize(metrics.pixelSize);
+	} else {
+		font.setPixelSize(
+			int(base::SafeRound(metrics.pixelSize * kSubSuperMultiplier)));
+	}
+	if (!monospace) {
+		font.setWeight((flags & FontFlag::Bold)
+			? QFont::DemiBold
+			: QFont::Normal);
+		if (font.bold()) {
+			const auto style = QFontInfo(font).styleName();
+			if (CustomSettings.semiboldIsBold
 				|| (!style.isEmpty() && !style.startsWith(
 					"Semibold",
 					Qt::CaseInsensitive))) {
-			font.setBold(true);
+				font.setBold(true);
+			}
 		}
-	}
 
-	font.setItalic(flags & FontFlag::Italic);
-	font.setUnderline(flags & FontFlag::Underline);
-	font.setStrikeOut(flags & FontFlag::StrikeOut);
+		font.setItalic(flags & FontFlag::Italic);
+		font.setUnderline(flags & FontFlag::Underline);
+		font.setStrikeOut(flags & FontFlag::StrikeOut);
+	}
 
 	const auto index = (family == Custom) ? 0 : RegisterFontFamily(family);
 	return {
@@ -390,20 +385,34 @@ void StartFonts() {
 
 	style_InitFontsResource();
 
-#ifndef LIB_UI_USE_PACKAGED_FONTS
-	const auto base = u":/gui/fonts/"_q;
 	const auto name = u"Open Sans"_q;
 
-	for (const auto &file : FontTypes) {
-		LoadCustomFont(base + file + u".ttf"_q);
+	for (const auto &file : QDir(u":/gui/fonts/"_q).entryInfoList()) {
+		LoadCustomFont(file.canonicalFilePath());
 	}
 
-	for (const auto &file : PersianFontTypes) {
-		LoadCustomFont(base + file + u".ttf"_q);
+	if (!QFontInfo(name).family().trimmed().startsWith(
+			name,
+			Qt::CaseInsensitive)) {
+		const auto text = u"Unable to load '"_q
+			+ name
+			+ u"', expect font metric issues."_q;
+		LOG(("Font Error: %1").arg(text));
+#if __has_include(<glib.h>)
+		g_warning("%s", text.toUtf8().constData());
+#endif //  __has_include(<glib.h>)
 	}
+
 	QFont::insertSubstitution(name, u"Vazirmatn UI NL"_q);
 
-#ifdef Q_OS_MAC
+#ifdef Q_OS_WIN
+	QFont::insertSubstitutions(name, {
+		// https://qt-project.atlassian.net/browse/QTBUG-134052
+		u"Ebrima"_q,
+		// https://qt-project.atlassian.net/browse/QTBUG-94756
+		u"Nirmala UI"_q,
+	});
+#elif defined Q_OS_MAC // Q_OS_WIN
 	const auto list = QStringList{
 		u"STIXGeneral"_q,
 		u".SF NS Text"_q,
@@ -412,7 +421,6 @@ void StartFonts() {
 	};
 	QFont::insertSubstitutions(name, list);
 #endif // Q_OS_MAC
-#endif // !LIB_UI_USE_PACKAGED_FONTS
 }
 
 void DestroyFonts() {
@@ -444,6 +452,9 @@ FontData::FontData(const FontResolveResult &result, FontVariants *modified)
 	descent = height - ascent;
 	spacew = width(QLatin1Char(' '));
 	elidew = width(u"..."_q);
+
+	fascent = QFixed::fromReal(result.ascent);
+	fleading = QFixed::fromReal(_m.leading());
 }
 
 Font FontData::bold(bool set) const {
@@ -462,8 +473,8 @@ Font FontData::strikeout(bool set) const {
 	return otherFlagsFont(FontFlag::StrikeOut, set);
 }
 
-Font FontData::semibold(bool set) const {
-	return otherFlagsFont(FontFlag::Semibold, set);
+Font FontData::suborsuper(bool set) const {
+	return otherFlagsFont(FontFlag::SubOrSuper, set);
 }
 
 Font FontData::monospace(bool set) const {
@@ -483,7 +494,11 @@ int FontData::family() const {
 }
 
 Font FontData::otherFlagsFont(FontFlag flag, bool set) const {
-	const auto newFlags = set ? (_flags | flag) : (_flags & ~flag);
+	const auto newFlags = !set
+		? (_flags & ~flag)
+		: ((_flags | flag) & FontFlag::Monospace)
+		? FontFlag::Monospace
+		: (_flags | flag);
 	if (!_modified[newFlags]) {
 		_modified[newFlags] = Font(_size, newFlags, _family, &_modified);
 	}

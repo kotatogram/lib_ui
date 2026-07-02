@@ -81,6 +81,12 @@ checkboxFg: #b3b3b3; // default unchecked checkbox rounded rectangle
 botKbBg: menuBgOver; // bot keyboard button background
 botKbDownBg: menuBgRipple; // bot keyboard button ripple effect
 botKbColor: windowBoldFgOver; // bot keyboard button text
+botKbPrimaryBg: #298acfcc; // bot keyboard Primary button background
+botKbDangerBg: #e05356cc; // bot keyboard Danger button background
+botKbSuccessBg: #61c752cc; // bot keyboard Success button background
+botKbInlinePrimaryBg: #378eaeb3; // inline bot keyboard Primary button background
+botKbInlineDangerBg: #c9543eb3; // inline bot keyboard Danger button background
+botKbInlineSuccessBg: #489d38b3; // inline bot keyboard Success button background
 
 sliderBgInactive: #e1eaef; // default slider not active bar (like in Settings when you choose interface scale or custom notifications count)
 sliderBgActive: windowBgActive; // default slider active bar (like in Settings when you choose interface scale or custom notifications count)
@@ -640,7 +646,9 @@ sideBarTextFgActive: #64b9fa; // filters side bar active item text
 sideBarIconFg: #8393a3; // filters side bar icon
 sideBarIconFgActive: #5eb5f7; // filters side bar active item icon
 sideBarBadgeBg: #5eb5f7; // filters side bar badge background
+sideBarBadgeBgActive: sideBarBadgeBg; // filters side bar badge background when folder is open
 sideBarBadgeBgMuted: #8393a3; // filters side bar unimportant badge background
+sideBarBadgeBgMutedActive: sideBarBadgeBg; // filters side bar unimportant badge background when folder is open
 sideBarBadgeFg: #ffffff; // filters side bar badge text
 
 songCoverOverlayFg: #00000066; // song cover overlay
@@ -670,11 +678,20 @@ statisticsChartLineIndigo: #7f79f3; // represents indigo color on statistical ch
 statisticsChartLinePurple: #9f79e8; // represents purple color on statistical charts
 statisticsChartLineCyan: #40d0ca; // represents cyan color on statistical charts
 
-creditsBg1: #f7d05f; // credits icon gradient 1, normal
-creditsBg2: #fcecc0; // credits icon gradient 2, light
+creditsBg1: #ffb222; // credits icon gradient 1, normal
+creditsBg2: #FFD951; // credits icon gradient 2, light
 creditsBg3: #f0b400; // credits icon gradient 3, dark
 creditsFg: #ba7000; // credits text on light background
 creditsStroke: #da8735; // credits icon stroke
+currencyFg: #168acd; // currency icon, blue
+
+rankAdminFg: #49a355; // admin badge text and pill, green
+rankOwnerFg: #956ac8; // owner badge text and pill, purple
+rankUserFg: windowSubTextFg; // regular user badge text, gray
+
+dialogsMentionIconFg: #40a7e3 | dialogsVerifiedIconBg; // chat list mention icon
+dialogsReactionIconFg: #e05356 | attentionButtonFg; // chat list reaction icon
+dialogsPollIconFg: #997be1 | historyPeer5NameFg; // chat list poll icon
 
 // kotatogram
 ktgTopBarBg: topBarBg; // Kotatogram: top bar background

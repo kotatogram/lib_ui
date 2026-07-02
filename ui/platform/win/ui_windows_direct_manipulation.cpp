@@ -10,7 +10,7 @@
 #include "base/platform/base_platform_info.h"
 #include "base/platform/win/base_windows_safe_library.h"
 #include "ui/platform/win/ui_window_win.h"
-#include "ui/widgets/elastic_scroll.h" // kPixelToAngleDelta
+#include "ui/ui_utility.h" // kPixelToAngleDelta
 #include "ui/rp_widget.h"
 
 #include <qpa/qwindowsysteminterface.h>
@@ -43,11 +43,25 @@ namespace {
 
 UINT(__stdcall *GetDpiForWindow)(_In_ HWND hwnd);
 
+BOOL(__stdcall *GetPointerType)(
+	UINT32 pointerId,
+	POINTER_INPUT_TYPE *pointerType);
+
 [[nodiscard]] bool GetDpiForWindowSupported() {
 	static const auto Result = [&] {
 #define LOAD_SYMBOL(lib, name) base::Platform::LoadMethod(lib, #name, name)
 		const auto user32 = base::Platform::SafeLoadLibrary(L"User32.dll");
 		return LOAD_SYMBOL(user32, GetDpiForWindow);
+#undef LOAD_SYMBOL
+	}();
+	return Result;
+}
+
+[[nodiscard]] bool GetPointerTypeSupported() {
+	static const auto Result = [&] {
+#define LOAD_SYMBOL(lib, name) base::Platform::LoadMethod(lib, #name, name)
+		const auto user32 = base::Platform::SafeLoadLibrary(L"User32.dll");
+		return LOAD_SYMBOL(user32, GetPointerType);
 #undef LOAD_SYMBOL
 	}();
 	return Result;
@@ -325,11 +339,11 @@ HRESULT DirectManipulation::Handler::OnInteraction(
 DirectManipulation::DirectManipulation(not_null<RpWidget*> widget)
 : NativeEventFilter(widget)
 , _interacting([=] { _updateManager->Update(nullptr); }) {
-	widget->sizeValue() | rpl::start_with_next([=](QSize size) {
+	widget->sizeValue() | rpl::on_next([=](QSize size) {
 		sizeUpdated(size * widget->devicePixelRatio());
 	}, _lifetime);
 
-	widget->winIdValue() | rpl::start_with_next([=](WId winId) {
+	widget->winIdValue() | rpl::on_next([=](WId winId) {
 		destroy();
 
 		if (const auto hwnd = reinterpret_cast<HWND>(winId)) {
@@ -400,7 +414,7 @@ bool DirectManipulation::init(HWND hwnd) {
 
 	_handler.attach(new Handler());
 	_handler->interacting(
-	) | rpl::start_with_next([=](bool interacting) {
+	) | rpl::on_next([=](bool interacting) {
 		base::Integration::Instance().enterFromEventLoop([&] {
 			if (interacting) {
 				_interacting.start();
@@ -409,7 +423,7 @@ bool DirectManipulation::init(HWND hwnd) {
 			}
 		});
 	}, _handler->lifetime());
-	_handler->events() | rpl::start_with_next([=](Event &&event) {
+	_handler->events() | rpl::on_next([=](Event &&event) {
 		base::Integration::Instance().enterFromEventLoop([&] {
 			_events.fire(std::move(event));
 		});
@@ -452,10 +466,10 @@ bool DirectManipulation::filterNativeEvent(
 	switch (msg) {
 
 	case DM_POINTERHITTEST:
-		if (_viewport) {
+		if (_viewport && GetPointerTypeSupported()) {
 			const auto id = UINT32(GET_POINTERID_WPARAM(wParam));
 			auto type = POINTER_INPUT_TYPE();
-			if (::GetPointerType(id, &type) && type == PT_TOUCHPAD) {
+			if (GetPointerType(id, &type) && type == PT_TOUCHPAD) {
 				_viewport->SetContact(id);
 			}
 			return true;
@@ -503,7 +517,7 @@ void ActivateDirectManipulation(not_null<RpWidget*> window) {
 	auto dm = std::make_unique<DirectManipulation>(window);
 
 	dm->events(
-	) | rpl::start_with_next([=](const DirectManipulationEvent &event) {
+	) | rpl::on_next([=](const DirectManipulationEvent &event) {
 		using Type = DirectManipulationEventType;
 		const auto send = [&](Qt::ScrollPhase phase) {
 			const auto windowHandle = window->windowHandle();

@@ -19,7 +19,7 @@ public:
 		not_null<String*> string,
 		const TextWithEntities &textWithEntities,
 		const TextParseOptions &options,
-		const std::any &context);
+		const MarkedContext &context);
 
 private:
 	struct ReadyToken {
@@ -27,6 +27,11 @@ private:
 
 	class StartedEntity {
 	public:
+		struct ColorIndices {
+			uint16 colorIndex = 0;
+			uint16 bgIndex = 0;
+		};
+
 		enum class Type {
 			Flags,
 			Link,
@@ -37,13 +42,22 @@ private:
 
 		explicit StartedEntity(TextBlockFlags flags);
 		explicit StartedEntity(uint16 index, Type type);
+		explicit StartedEntity(ColorIndices indices);
 
 		[[nodiscard]] Type type() const;
 		[[nodiscard]] std::optional<TextBlockFlags> flags() const;
 		[[nodiscard]] std::optional<uint16> linkIndex() const;
-		[[nodiscard]] std::optional<uint16> colorIndex() const;
+		[[nodiscard]] std::optional<ColorIndices> colorIndices() const;
 
 	private:
+		static constexpr auto kBgIndexShift = 6;
+		static constexpr auto kColorIndexMask = AbstractBlock::kMaxColorIndex;
+
+		[[nodiscard]] static constexpr int PackColorIndices(
+			ColorIndices indices) {
+			return indices.colorIndex | (indices.bgIndex << kBgIndexShift);
+		}
+
 		const int _value = 0;
 		const Type _type;
 
@@ -53,7 +67,7 @@ private:
 		not_null<String*> string,
 		TextWithEntities &&source,
 		const TextParseOptions &options,
-		const std::any &context,
+		const MarkedContext &context,
 		ReadyToken);
 
 	void trimSourceRange();
@@ -67,6 +81,7 @@ private:
 	void parseEmojiFromCurrent();
 	void finalize(const TextParseOptions &options);
 
+	void closeQuote();
 	void finishEntities();
 	void skipPassedEntities();
 	void skipBadEntities();
@@ -86,7 +101,7 @@ private:
 	QString &_tText;
 	std::vector<Block> &_tBlocks;
 	const TextWithEntities _source;
-	const std::any &_context;
+	const MarkedContext &_context;
 	const QChar * const _start = nullptr;
 	const QChar *_end = nullptr; // mutable, because we trim by decrementing.
 	const QChar *_ptr = nullptr;
@@ -95,12 +110,10 @@ private:
 	QString _customEmojiData;
 	const bool _multiline = false;
 
-	const bool _checkTilde = false; // do we need a special text block for tilde symbol
-
 	std::vector<uint16> _linksIndexes;
 
 	std::vector<EntityLinkData> _links;
-	std::vector<EntityLinkData> _monos;
+	std::vector<EntityLinkData> _internals;
 	base::flat_map<
 		const QChar*,
 		std::vector<StartedEntity>> _startedEntities;
@@ -112,7 +125,8 @@ private:
 	TextBlockFlags _flags;
 	uint16 _linkIndex = 0;
 	uint16 _colorIndex = 0;
-	uint16 _monoIndex = 0;
+	uint16 _bgIndex = 0;
+	uint16 _internalIndex = 0;
 	uint16 _quoteIndex = 0;
 	int _quoteStartPosition = 0;
 	EmojiPtr _emoji = nullptr; // current emoji, if current word is an emoji, or zero

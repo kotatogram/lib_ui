@@ -41,7 +41,7 @@ public:
 
 	void setPointerCursor(bool enablePointerCursor);
 
-	void setAcceptBoth(bool acceptBoth = true);
+	void setAcceptBoth(bool acceptBoth = true, bool triggerOnPress = false);
 
 	void setClickedCallback(Fn<void()> callback) {
 		_clickedCallback = std::move(callback);
@@ -53,12 +53,22 @@ public:
 	template <typename Handler>
 	void addClickHandler(Handler &&handler) {
 		clicks(
-		) | rpl::start_with_next(
+		) | rpl::on_next(
 			std::forward<Handler>(handler),
 			lifetime());
 	}
 
 	void clicked(Qt::KeyboardModifiers modifiers, Qt::MouseButton button);
+
+	void setIsMenuButton(bool value) {
+		_menuButton = value;
+	}
+
+	QAccessible::Role accessibilityRole() override {
+		return _menuButton ? QAccessible::ButtonMenu : QAccessible::Button;
+	}
+	AccessibilityState accessibilityState() const override;
+	void accessibilityDoAction(const QString &name) override;
 
 protected:
 	void enterEventHook(QEnterEvent *e) override;
@@ -66,6 +76,8 @@ protected:
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
+	void keyReleaseEvent(QKeyEvent *e) override;
 
 protected:
 	enum class StateFlag {
@@ -99,13 +111,16 @@ protected:
 private:
 	void updateCursor();
 	void checkIfOver(QPoint localPos);
+	[[nodiscard]] bool isSubmitEvent(not_null<QKeyEvent*> e) const;
 
 	State _state = StateFlag::None;
 
 	Qt::KeyboardModifiers _modifiers;
-	bool _enablePointerCursor = true;
-	bool _pointerCursor = false;
-	bool _acceptBoth = false;
+	bool _enablePointerCursor : 1 = true;
+	bool _pointerCursor : 1 = false;
+	bool _acceptBoth : 1 = false;
+	bool _triggerOnPress : 1 = false;
+	bool _menuButton : 1 = false;
 
 	Fn<void()> _clickedCallback;
 

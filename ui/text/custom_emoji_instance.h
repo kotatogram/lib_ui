@@ -16,6 +16,10 @@
 class QColor;
 class QPainter;
 
+namespace style {
+struct IconEmoji;
+} // namespace style
+
 namespace Ui {
 class DynamicImage;
 class FrameGenerator;
@@ -145,7 +149,7 @@ struct RendererDescriptor {
 class Renderer final : public base::has_weak_ptr {
 public:
 	explicit Renderer(RendererDescriptor &&descriptor);
-	virtual ~Renderer();
+	~Renderer();
 
 	PaintFrameResult paint(QPainter &p, const Context &context);
 	[[nodiscard]] std::optional<Cached> ready(const QString &entityData);
@@ -279,8 +283,8 @@ public:
 	Internal(
 		QString entityData,
 		QImage image,
-		QMargins padding,
-		bool colored);
+		QMargins padding = {},
+		bool colored = false);
 
 	int width() override;
 	QString entityData() override;
@@ -322,5 +326,15 @@ private:
 	bool _subscribed = false;
 
 };
+
+struct IconEmojiFrameCache {
+	QImage frame;
+	int paletteVersion = 0;
+};
+void PaintIconEmoji(
+	QPainter &p,
+	const Context &context,
+	not_null<const style::IconEmoji*> emoji,
+	IconEmojiFrameCache &cache);
 
 } // namespace Ui::CustomEmoji

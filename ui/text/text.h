@@ -32,6 +32,7 @@ namespace Ui {
 class SpoilerMessCached;
 
 extern const QString kQEllipsis;
+extern const QString kQBullet;
 
 inline constexpr auto kQFixedMax = (INT_MAX / 256);
 
@@ -76,6 +77,7 @@ static constexpr TextSelection AllTextSelection = { 0, 0xFFFF };
 
 namespace Ui::Text {
 
+class CustomEmoji;
 class AbstractBlock;
 class Block;
 class Word;
@@ -85,11 +87,29 @@ struct SpoilerData;
 struct QuoteDetails;
 struct QuotesData;
 struct ExtendedData;
+struct MarkedContext;
+
+using CustomEmojiFactory = Fn<std::unique_ptr<CustomEmoji>(
+	QStringView,
+	const MarkedContext &)>;
+
+struct FormattedDateResult {
+	QString text;
+	int32 nextUpdate = 0;
+};
+using FormattedDateFactory = Fn<FormattedDateResult(int32 date, FormattedDateFlags flags)>;
+
+struct MarkedContext {
+	Fn<void()> repaint;
+	CustomEmojiFactory customEmojiFactory;
+	FormattedDateFactory formattedDateFactory;
+	std::any other;
+};
 
 struct Modification {
 	int position = 0;
 	uint16 skipped = 0;
-	bool added = false;
+	uint16 added = 0;
 };
 
 struct StateRequest {
@@ -144,6 +164,8 @@ private:
 struct SpecialColor {
 	const QPen *pen = nullptr;
 	const QPen *penSelected = nullptr;
+	const QBrush *bg = nullptr;
+	const QBrush *bgSelected = nullptr;
 };
 
 struct LineGeometry {
@@ -151,10 +173,22 @@ struct LineGeometry {
 	int width = 0;
 	bool elided = false;
 };
+struct LineLayoutInfo {
+	int left = 0;
+	int width = 0;
+	int bottom = 0;
+	bool rtl = false;
+	int baseline = 0;
+};
 struct GeometryDescriptor {
 	Fn<LineGeometry(int line)> layout;
 	bool breakEverywhere = false;
 	bool *outElided = nullptr;
+};
+
+struct LinePostprocess {
+	Fn<Fn<void(QImage&)>(int lineIndex)> method;
+	not_null<QImage*> cache;
 };
 
 [[nodiscard]] not_null<SpoilerMessCache*> DefaultSpoilerCache();
@@ -241,6 +275,7 @@ struct PaintContext {
 	// Elision middle works only with elisionLines = 1 and is very limited.
 	bool elisionMiddle = false;
 	bool useFullWidth = false; // !(width = min(availableWidth, maxWidth()))
+	const LinePostprocess *linePostprocess = nullptr;
 };
 
 class String {
@@ -256,11 +291,14 @@ public:
 		const TextWithEntities &textWithEntities,
 		const TextParseOptions &options = kMarkupTextOptions,
 		int minResizeWidth = kQFixedMax,
-		const std::any &context = {});
+		const MarkedContext &context = {});
 	String(String &&other);
 	String &operator=(String &&other);
 	~String();
 
+	[[nodiscard]] QSize countSize(
+		int width,
+		bool breakEverywhere = false) const;
 	[[nodiscard]] int countWidth(
 		int width,
 		bool breakEverywhere = false) const;
@@ -276,6 +314,9 @@ public:
 	[[nodiscard]] std::vector<int> countLineWidths(
 		int width,
 		LineWidthsOptions options) const;
+	[[nodiscard]] std::vector<LineLayoutInfo> countLinesGeometry(
+		int width,
+		bool breakEverywhere = false) const;
 
 	struct DimensionsResult {
 		int width = 0;
@@ -293,8 +334,15 @@ public:
 		GeometryDescriptor geometry,
 		DimensionsRequest request) const;
 
-	void setText(const style::TextStyle &st, const QString &text, const TextParseOptions &options = kDefaultTextOptions);
-	void setMarkedText(const style::TextStyle &st, const TextWithEntities &textWithEntities, const TextParseOptions &options = kMarkupTextOptions, const std::any &context = {});
+	void setText(
+		const style::TextStyle &st,
+		const QString &text,
+		const TextParseOptions &options = kDefaultTextOptions);
+	void setMarkedText(
+		const style::TextStyle &st,
+		const TextWithEntities &textWithEntities,
+		const TextParseOptions &options = kMarkupTextOptions,
+		const MarkedContext &context = {});
 
 	[[nodiscard]] bool hasLinks() const;
 	void setLink(uint16 index, const ClickHandlerPtr &lnk);
@@ -302,6 +350,11 @@ public:
 	[[nodiscard]] bool hasSpoilers() const;
 	void setSpoilerRevealed(bool revealed, anim::type animated);
 	void setSpoilerLinkFilter(Fn<bool(const ClickContext&)> filter);
+
+	[[nodiscard]] bool hasCustomEmoji() const;
+	void setCustomEmojiClickHandler(
+		Fn<bool(QStringView)> predicate,
+		Fn<void(QStringView, ClickContext)> callback);
 
 	[[nodiscard]] bool hasCollapsedBlockquots() const;
 	[[nodiscard]] bool blockquoteCollapsed(int index) const;
@@ -319,6 +372,9 @@ public:
 	}
 	[[nodiscard]] int minHeight() const {
 		return _minHeight;
+	}
+	[[nodiscard]] int minResizeWidth() const {
+		return _minResizeWidth;
 	}
 	[[nodiscard]] int countMaxMonospaceWidth() const;
 
@@ -371,12 +427,16 @@ public:
 
 	[[nodiscard]] bool hasNotEmojiAndSpaces() const;
 	[[nodiscard]] const std::vector<Modification> &modifications() const;
+	[[nodiscard]] int32 nextFormattedDateUpdate() const;
 
 	[[nodiscard]] const style::TextStyle *style() const {
 		return _st;
 	}
 
 	[[nodiscard]] int lineHeight() const;
+
+	[[nodiscard]] TextSelection linkRangeFor(
+		const ClickHandlerPtr &link) const;
 
 	void clear();
 
@@ -398,6 +458,15 @@ private:
 
 	};
 
+	struct LineMetrics {
+		QFixed ascent = 0;
+		QFixed descent = 0;
+
+		[[nodiscard]] int height() const {
+			return (ascent + descent).toInt();
+		}
+	};
+
 	[[nodiscard]] not_null<ExtendedData*> ensureExtended();
 	[[nodiscard]] not_null<QuotesData*> ensureQuotes();
 
@@ -417,6 +486,14 @@ private:
 	[[nodiscard]] QMargins quotePadding(QuoteDetails *quote) const;
 	[[nodiscard]] int quoteMinWidth(QuoteDetails *quote) const;
 	[[nodiscard]] const QString &quoteHeaderText(QuoteDetails *quote) const;
+	[[nodiscard]] QFixed blockBaselineShift(const AbstractBlock *block) const;
+	[[nodiscard]] LineMetrics defaultLineMetrics() const;
+	[[nodiscard]] LineMetrics resolveLineMetrics(
+		int lineStart,
+		int lineEnd,
+		int blockIndexHint) const;
+	[[nodiscard]] bool hasObjectAtPosition(int position) const;
+	[[nodiscard]] bool hasReplacementObjectAtPosition(int position) const;
 
 	// Returns -1 in case there is no limit.
 	[[nodiscard]] int quoteLinesLimit(QuoteDetails *quote) const;
@@ -438,8 +515,8 @@ private:
 		FlagsChangeCallback flagsChangeCallback) const;
 
 	// Template method for countWidth(), countHeight(), countLineWidths().
-	// callback(lineWidth, lineBottom) will be called for all lines with:
-	// QFixed lineWidth, int lineBottom
+	// callback(lineWidth, lineBottom, lineLeft, lineBaseline, rtl)
+	// will be called for all lines.
 	template <typename Callback>
 	void enumerateLines(
 		int w,
@@ -451,6 +528,7 @@ private:
 		Callback &&callback) const;
 
 	void insertModifications(int position, int delta);
+	void insertReplacement(int position, int skipped, int added);
 	void removeModificationsAfter(int size);
 	void recountNaturalSize(
 		bool initial,
@@ -477,6 +555,7 @@ private:
 	bool _isIsolatedEmoji : 1 = false;
 	bool _isOnlyCustomEmoji : 1 = false;
 	bool _hasNotEmojiAndSpaces : 1 = false;
+	bool _hasSubscriptsOrSuperscripts : 1 = false;
 	bool _skipBlockAddedNewline : 1 = false;
 	bool _endsWithQuoteOrOtherDirection : 1 = false;
 
@@ -497,6 +576,11 @@ private:
 [[nodiscard]] bool IsDiacritic(QChar ch);
 [[nodiscard]] bool IsReplacedBySpace(QChar ch);
 [[nodiscard]] bool IsTrimmed(QChar ch);
+
+[[nodiscard]] QSize CountOptimalTextSize(
+	const String &text,
+	int minWidth,
+	int maxWidth);
 
 } // namespace Ui::Text
 

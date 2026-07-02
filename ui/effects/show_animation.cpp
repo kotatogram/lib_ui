@@ -7,7 +7,6 @@
 #include "ui/effects/show_animation.h"
 
 #include "ui/effects/animations.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/rp_widget.h"
 #include "ui/ui_utility.h"
 #include "styles/style_widgets.h"
@@ -22,7 +21,7 @@ void AnimateWidgets(const Widgets &targets, bool show) {
 	};
 	struct Object {
 		base::unique_qptr<Ui::RpWidget> container;
-		QPointer<Ui::RpWidget> weakTarget;
+		base::weak_qptr<Ui::RpWidget> weakTarget;
 	};
 	struct State {
 		rpl::event_stream<Finish> destroy;
@@ -38,14 +37,14 @@ void AnimateWidgets(const Widgets &targets, bool show) {
 	for (const auto &target : targets) {
 		state->objects.push_back({
 			base::make_unique_q<Ui::RpWidget>(target->parentWidget()),
-			Ui::MakeWeak(target),
+			base::make_weak(target),
 		});
 
 		const auto pixmap = Ui::GrabWidget(target);
 		const auto raw = state->objects.back().container.get();
 
 		raw->paintRequest(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			QPainter p(raw);
 
 			p.setOpacity(state->animation.value(to));
@@ -53,7 +52,7 @@ void AnimateWidgets(const Widgets &targets, bool show) {
 		}, raw->lifetime());
 
 		target->geometryValue(
-		) | rpl::start_with_next([=](const QRect &r) {
+		) | rpl::on_next([=](const QRect &r) {
 			raw->setGeometry(r);
 		}, raw->lifetime());
 
@@ -67,7 +66,7 @@ void AnimateWidgets(const Widgets &targets, bool show) {
 	state->destroy.events(
 	) | rpl::take(
 		1
-	) | rpl::start_with_next([=](Finish type) mutable {
+	) | rpl::on_next([=](Finish type) mutable {
 		if (type == Finish::Good && show) {
 			for (const auto &object : state->objects) {
 				if (object.weakTarget) {
@@ -83,7 +82,9 @@ void AnimateWidgets(const Widgets &targets, bool show) {
 	state->animation.start(
 		[=](auto value) {
 			for (const auto &object : state->objects) {
-				object.container->update();
+				if (object.container) {
+					object.container->update();
+				}
 
 				if (!object.weakTarget && show) {
 					state->destroy.fire(Finish::Bad);

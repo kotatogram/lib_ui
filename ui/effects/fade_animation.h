@@ -14,7 +14,7 @@ namespace Ui {
 
 class FadeAnimation {
 public:
-	FadeAnimation(TWidget *widget, float64 scale = 1.);
+	FadeAnimation(RpWidget *widget, float64 scale = 1.);
 
 	bool paint(QPainter &p);
 	void refreshCache();
@@ -24,6 +24,11 @@ public:
 
 	using UpdatedCallback = Fn<void(float64)>;
 	void setUpdatedCallback(UpdatedCallback &&callback);
+
+	void setOpacity(float64 opacity);
+	[[nodiscard]] float64 opacity() const {
+		return _opacity;
+	}
 
 	void show();
 	void hide();
@@ -49,8 +54,9 @@ private:
 	void updateCallback();
 	QPixmap grabContent();
 
-	TWidget *_widget = nullptr;
+	RpWidget *_widget = nullptr;
 	float64 _scale = 1.;
+	float64 _opacity = 1.;
 
 	Ui::Animations::Simple _animation;
 	QSize _size;

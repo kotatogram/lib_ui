@@ -6,6 +6,7 @@
 //
 #pragma once
 
+#include "base/qt_connection.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/menu/menu.h"
 #include "ui/widgets/menu/menu_common.h"
@@ -13,9 +14,15 @@
 
 namespace Ui::Menu {
 
+class Menu;
+
 class ItemBase : public RippleButton {
 public:
-	ItemBase(not_null<RpWidget*> parent, const style::Menu &st);
+	ItemBase(not_null<Menu*> parent, const style::Menu &st);
+
+	Qt::FocusPolicy accessibilityFocusPolicy() override {
+		return Qt::ClickFocus;
+	}
 
 	TriggeredSource lastTriggeredSource() const;
 
@@ -32,6 +39,12 @@ public:
 
 	rpl::producer<CallbackData> clicks() const;
 
+	void setActionTriggered(Fn<void()> callback);
+	void setClickedCallback(Fn<void()> callback) = delete;
+
+	void setPreventClose(bool prevent);
+	bool preventClose() const;
+
 	rpl::producer<int> minWidthValue() const;
 	int minWidth() const;
 	void setMinWidth(int w);
@@ -45,14 +58,21 @@ public:
 	virtual void finishAnimating();
 
 protected:
-	void initResizeHook(rpl::producer<QSize> &&size);
+	void fitToMenuWidth();
 
 	void enableMouseSelecting();
 	void enableMouseSelecting(not_null<RpWidget*> widget);
 
 	virtual int contentHeight() const = 0;
 
+	void keyPressEvent(QKeyEvent *e) override;
+	void keyReleaseEvent(QKeyEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+
 private:
+	bool _mousePressed = false;
 	int _index = -1;
 
 	rpl::variable<bool> _selected = false;
@@ -61,6 +81,12 @@ private:
 	rpl::variable<int> _minWidth = 0;
 
 	TriggeredSource _lastTriggeredSource = TriggeredSource::Mouse;
+
+	bool _preventClose = false;
+
+	base::qt_connection _connection;
+
+	Menu *_menu = nullptr;
 
 };
 

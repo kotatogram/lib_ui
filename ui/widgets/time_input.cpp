@@ -7,7 +7,6 @@
 #include "ui/widgets/time_input.h"
 
 #include "ui/widgets/fields/time_part_input.h"
-#include "ui/qt_weak_factory.h"
 #include "base/qt/qt_string_view.h"
 #include "base/invoke_queued.h"
 
@@ -69,10 +68,7 @@ TimeInput::TimeInput(
 	GetHour(value))
 , _separator1(
 	this,
-	object_ptr<FlatLabel>(
-		this,
-		QString(":"),
-		_stSeparator),
+	object_ptr<FlatLabel>(this, u":"_q, _stSeparator),
 	_stSeparatorPadding)
 , _minute(
 	this,
@@ -81,7 +77,7 @@ TimeInput::TimeInput(
 	GetMinute(value))
 , _value(valueCurrent()) {
 	const auto focused = [=](const object_ptr<TimePart> &field) {
-		return [this, pointer = MakeWeak(field.data())]{
+		return [this, pointer = base::make_weak(field.data())]{
 			_borderAnimationStart = pointer->borderAnimationStart()
 				+ pointer->x()
 				- _hour->x();
@@ -103,15 +99,15 @@ TimeInput::TimeInput(
 	connect(_minute, &MaskedInputField::changed, changed);
 	_hour->setMaxValue(23);
 	_hour->setWheelStep(1);
-	_hour->putNext() | rpl::start_with_next([=](QChar ch) {
+	_hour->putNext() | rpl::on_next([=](QChar ch) {
 		putNext(_minute, ch);
 	}, lifetime());
 	_minute->setMaxValue(59);
 	_minute->setWheelStep(10);
-	_minute->erasePrevious() | rpl::start_with_next([=] {
+	_minute->erasePrevious() | rpl::on_next([=] {
 		erasePrevious(_hour);
 	}, lifetime());
-	_minute->jumpToPrevious() | rpl::start_with_next([=] {
+	_minute->jumpToPrevious() | rpl::on_next([=] {
 		_hour->setCursorPosition(_hour->getLastText().size());
 		_hour->setFocus();
 	}, lifetime());
@@ -119,7 +115,7 @@ TimeInput::TimeInput(
 	setMouseTracking(true);
 
 	_value.changes(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		setErrorShown(false);
 	}, lifetime());
 

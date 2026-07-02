@@ -14,6 +14,10 @@
 #include "styles/style_layers.h"
 #include "styles/palette.h"
 
+#include <QtGui/QWindow>
+
+#include <limits>
+
 namespace Ui {
 
 struct BoxLayerWidget::LoadingProgress {
@@ -32,20 +36,23 @@ BoxLayerWidget::LoadingProgress::LoadingProgress(
 }
 
 BoxLayerWidget::BoxLayerWidget(
-	not_null<LayerStackWidget*> layer,
+	QWidget *parent,
+	not_null<LayerStackDelegate*> delegate,
 	object_ptr<BoxContent> content)
-: LayerWidget(layer)
-, _layer(layer)
+: LayerWidget(parent)
+, _layer(delegate)
 , _content(std::move(content))
 , _roundRect(st::boxRadius, st().bg) {
 	_content->setParent(this);
-	_content->setDelegate(this);
 
 	_additionalTitle.changes(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateSize();
 		update();
 	}, lifetime());
+
+	updateMaxRealHeight();
+	_content->setDelegate(this);
 }
 
 BoxLayerWidget::~BoxLayerWidget() = default;
@@ -66,20 +73,22 @@ int BoxLayerWidget::titleHeight() const {
 }
 
 const style::Box &BoxLayerWidget::st() const {
-	return _st
-		? *_st
-		: _layerType
-		? (_layer->boxStyleOverrideLayer()
-			? *_layer->boxStyleOverrideLayer()
-			: st::layerBox)
-		: (_layer->boxStyleOverride()
-			? *_layer->boxStyleOverride()
-			: st::defaultBox);
+	if (_st) {
+		return *_st;
+	}
+	const auto override = _layerType
+		? _layer->boxStyleOverrideLayer()
+		: _layer->boxStyleOverride();
+	if (override) {
+		return *override;
+	}
+	return _layerType ? st::layerBox : st::defaultBox;
 }
 
 void BoxLayerWidget::setStyle(const style::Box &st) {
 	_st = &st;
 	_roundRect.setColor(st.bg);
+	updateMaxRealHeight();
 }
 
 const style::Box &BoxLayerWidget::style() {
@@ -155,8 +164,13 @@ void BoxLayerWidget::paintAdditionalTitle(Painter &p) {
 }
 
 void BoxLayerWidget::parentResized() {
+	const auto parent = parentWidget();
+	if (!parent || !_layer->centerWithinOuter()) {
+		return;
+	}
+	updateMaxRealHeight();
 	auto newHeight = countRealHeight();
-	auto parentSize = parentWidget()->size();
+	auto parentSize = parent->size();
 	setGeometry(
 		(parentSize.width() - width()) / 2,
 		(parentSize.height() - newHeight) / 2,
@@ -165,14 +179,35 @@ void BoxLayerWidget::parentResized() {
 	update();
 }
 
-void BoxLayerWidget::setTitle(rpl::producer<TextWithEntities> title) {
+void BoxLayerWidget::updateMaxRealHeight() {
+	const auto &margin = st().margin;
+	const auto outer = _layer->layerOuterSize();
+	const auto parent = parentWidget();
+	const auto containerHeight = outer
+		? outer->height()
+		: parent
+		? parent->height()
+		: std::numeric_limits<int>::max() / 2;
+	const auto max = containerHeight - margin.top() - margin.bottom();
+	_realHeightMax = max;
+	_contentHeightMax = max - contentTop() - buttonsHeight();
+}
+
+void BoxLayerWidget::setTitle(
+		rpl::producer<TextWithEntities> title,
+		Text::MarkedContext context) {
 	const auto wasTitle = hasTitle();
 	if (title) {
-		_title.create(this, rpl::duplicate(title), st().title);
+		_title.create(
+			this,
+			rpl::duplicate(title),
+			st().title,
+			st::defaultPopupMenu,
+			context);
 		_title->show();
 		std::move(
 			title
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			updateTitlePosition();
 		}, _title->lifetime());
 	} else {
@@ -201,6 +236,14 @@ bool BoxLayerWidget::closeByOutsideClick() const {
 	return _closeByOutsideClick;
 }
 
+rpl::producer<int> BoxLayerWidget::layerHeightMaxValue() {
+	return _realHeightMax.value();
+}
+
+rpl::producer<int> BoxLayerWidget::contentHeightMaxValue() {
+	return _contentHeightMax.value();
+}
+
 bool BoxLayerWidget::hasTitle() const {
 	return (_title != nullptr) || !_additionalTitle.current().isEmpty();
 }
@@ -214,6 +257,20 @@ void BoxLayerWidget::showBox(
 
 void BoxLayerWidget::hideLayer() {
 	_layer->hideLayers(anim::type::normal);
+}
+
+ShowFactory BoxLayerWidget::showFactory() {
+	return _layer->showFactory();
+}
+
+QPointer<QWidget> BoxLayerWidget::outerContainer() {
+	if (const auto fromDelegate = _layer->layerOuterContainer()) {
+		return fromDelegate;
+	}
+	if (const auto parent = parentWidget()) {
+		return parent;
+	}
+	return this;
 }
 
 void BoxLayerWidget::updateSize() {
@@ -233,28 +290,23 @@ void BoxLayerWidget::updateButtonsPositions() {
 			right += button->width() + padding.left();
 		}
 	}
-	if (_topButton) {
-		_topButton->moveToRight(0, 0);
+	auto right = 0;
+	for (const auto &button : _topButtons) {
+		button->moveToRight(right, 0);
+		right += button->width();
 	}
-}
-
-ShowFactory BoxLayerWidget::showFactory() {
-	return _layer->showFactory();
-}
-
-QPointer<QWidget> BoxLayerWidget::outerContainer() {
-	return parentWidget();
 }
 
 void BoxLayerWidget::updateTitlePosition() {
 	_titleLeft = st::boxTitlePosition.x();
 	_titleTop = st::boxTitlePosition.y();
 	if (_title) {
-		const auto topButtonSkip = _topButton
-			? (_topButton->width() / 2)
-			: 0;
+		auto topButtonsSkip = 0;
+		for (const auto &button : _topButtons) {
+			topButtonsSkip += button->width();
+		}
 		_title->resizeToNaturalWidth(
-			width() - _titleLeft * 2 - topButtonSkip);
+			width() - _titleLeft * 2 - topButtonsSkip);
 		_title->moveToLeft(_titleLeft, _titleTop);
 	}
 }
@@ -269,7 +321,7 @@ void BoxLayerWidget::clearButtons() {
 		button.destroy();
 	}
 	_leftButton.destroy();
-	_topButton = nullptr;
+	base::take(_topButtons);
 }
 
 void BoxLayerWidget::addButton(object_ptr<AbstractButton> button) {
@@ -277,8 +329,26 @@ void BoxLayerWidget::addButton(object_ptr<AbstractButton> button) {
 	const auto raw = _buttons.back().data();
 	raw->setParent(this);
 	raw->show();
+	if (st().buttonWide) {
+		widthValue() | rpl::on_next([=](int width) {
+			const auto buttonWidth = width
+				- st().buttonPadding.left()
+				- st().buttonPadding.right();
+			if (buttonWidth > 0) {
+				raw->resizeToWidth(buttonWidth);
+			}
+		}, raw->lifetime());
+	}
 	raw->widthValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
+		if (st().buttonWide) {
+			const auto buttonWidth = width()
+				- st().buttonPadding.left()
+				- st().buttonPadding.right();
+			if (buttonWidth > 0 && raw->width() != buttonWidth) {
+				raw->resizeToWidth(buttonWidth);
+			}
+		}
 		updateButtonsPositions();
 	}, raw->lifetime());
 }
@@ -289,14 +359,14 @@ void BoxLayerWidget::addLeftButton(object_ptr<AbstractButton> button) {
 	raw->setParent(this);
 	raw->show();
 	raw->widthValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateButtonsPositions();
 	}, raw->lifetime());
 }
 
 void BoxLayerWidget::addTopButton(object_ptr<AbstractButton> button) {
-	_topButton = base::unique_qptr<AbstractButton>(button.release());
-	const auto raw = _topButton.get();
+	_topButtons.push_back(base::unique_qptr<AbstractButton>(button.release()));
+	const auto raw = _topButtons.back().get();
 	raw->setParent(this);
 	raw->show();
 	updateButtonsPositions();
@@ -333,17 +403,21 @@ void BoxLayerWidget::showLoading(bool show) {
 }
 
 
-void BoxLayerWidget::setDimensions(int newWidth, int maxHeight, bool forceCenterPosition) {
+void BoxLayerWidget::setDimensions(
+		int newWidth,
+		int maxHeight,
+		bool forceCenterPosition) {
 	_maxContentHeight = maxHeight;
 
 	auto fullHeight = countFullHeight();
 	if (width() != newWidth || _fullHeight != fullHeight) {
 		_fullHeight = fullHeight;
-		if (parentWidget()) {
+		const auto parent = parentWidget();
+		if (parent && _layer->centerWithinOuter()) {
 			auto oldGeometry = geometry();
 			resize(newWidth, countRealHeight());
 			auto newGeometry = geometry();
-			auto parentHeight = parentWidget()->height();
+			auto parentHeight = parent->height();
 			const auto bottomMargin = st().margin.bottom();
 			if (newGeometry.top() + newGeometry.height() + bottomMargin > parentHeight
 				|| forceCenterPosition) {
@@ -357,18 +431,15 @@ void BoxLayerWidget::setDimensions(int newWidth, int maxHeight, bool forceCenter
 					resizeEvent(0);
 				}
 			}
-			parentWidget()->update(oldGeometry.united(geometry()).marginsAdded(st::boxRoundShadow.extend));
+			parent->update(oldGeometry.united(geometry()).marginsAdded(st::boxRoundShadow.extend));
 		} else {
-			resize(newWidth, 0);
+			resize(newWidth, countRealHeight());
 		}
 	}
 }
 
 int BoxLayerWidget::countRealHeight() const {
-	const auto &margin = st().margin;
-	return std::min(
-		_fullHeight,
-		parentWidget()->height() - margin.top() - margin.bottom());
+	return std::min(_fullHeight, _realHeightMax.current());
 }
 
 int BoxLayerWidget::countFullHeight() const {
@@ -379,8 +450,7 @@ int BoxLayerWidget::contentTop() const {
 	return hasTitle()
 		? titleHeight()
 		: _noContentMargin
-		?
-		0
+		? 0
 		: st::boxTopMargin;
 }
 
@@ -401,6 +471,29 @@ void BoxLayerWidget::keyPressEvent(QKeyEvent *e) {
 	} else {
 		LayerWidget::keyPressEvent(e);
 	}
+}
+
+bool BoxLayerWidget::closeByBackButton() {
+	if (_content->closeByEscape()) {
+		closeBox();
+	}
+	return true;
+}
+
+void BoxLayerWidget::mousePressEvent(QMouseEvent *e) {
+	if (e->button() == Qt::LeftButton
+		&& _layer->dragByTitle()
+		&& e->pos().y() < titleHeight()) {
+		if (const auto top = window()) {
+			if (const auto handle = top->windowHandle()) {
+				if (handle->startSystemMove()) {
+					e->accept();
+					return;
+				}
+			}
+		}
+	}
+	LayerWidget::mousePressEvent(e);
 }
 
 } // namespace Ui

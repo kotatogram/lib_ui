@@ -6,6 +6,7 @@
 //
 #include "ui/platform/mac/ui_window_title_mac.h"
 
+#include "base/platform/base_platform_info.h"
 #include "ui/platform/ui_platform_window_title.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
@@ -21,19 +22,16 @@
 
 namespace Ui {
 namespace Platform {
-namespace internal {
 
-TitleControls::Layout TitleControlsLayout() {
-	return TitleControls::Layout{
+std::shared_ptr<TitleControlsLayout> TitleControlsLayout::Create() {
+	return std::shared_ptr<TitleControlsLayout>(new TitleControlsLayout({
 		.left = {
 			TitleControls::Control::Close,
 			TitleControls::Control::Minimize,
 			TitleControls::Control::Maximize,
 		}
-	};
+	}));
 }
-
-} // namespace internal
 
 TitleWidget::TitleWidget(not_null<RpWidget*> parent, int height)
 : RpWidget(parent)
@@ -81,7 +79,7 @@ void TitleWidget::init(int height) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
 	window()->widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		setGeometry(0, 0, width, height);
 	}, lifetime());
 
@@ -113,7 +111,7 @@ void TitleWidget::init(int height) {
 		}
 	}
 	if (!_textStyle) {
-		setFromFont(style::font(13, style::FontFlag::Semibold, 0));
+		setFromFont(style::font(13, style::FontFlag::Bold, 0));
 	}
 }
 
@@ -127,7 +125,8 @@ void TitleWidget::paintEvent(QPaintEvent *e) {
 
 	const auto full = _string.maxWidth();
 	const auto top = (height() - _textStyle->font->height) / 2;
-	if ((width() - _controlsRight * 2) < full) {
+	if (::Platform::IsMac26_0OrGreater()
+		|| ((width() - _controlsRight * 2) < full)) {
 		const auto left = _controlsRight;
 		_string.drawElided(p, left, top, width() - left);
 	} else {

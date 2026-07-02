@@ -10,6 +10,7 @@
 #include "ui/widgets/menu/menu.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/panel_animation.h"
+#include "ui/widgets/shadow.h"
 #include "ui/round_rect.h"
 #include "ui/rp_widget.h"
 #include "base/object_ptr.h"
@@ -37,9 +38,22 @@ public:
 		StartHide,
 	};
 
+	enum class SwitchDirection {
+		LeftToRight,
+		RightToLeft,
+	};
+
 	PopupMenu(QWidget *parent, const style::PopupMenu &st = st::defaultPopupMenu);
 	PopupMenu(QWidget *parent, QMenu *menu, const style::PopupMenu &st = st::defaultPopupMenu);
 	~PopupMenu();
+
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::PopupMenu;
+	}
+	Qt::FocusPolicy accessibilityFocusPolicy() override {
+		return Qt::ClickFocus;
+	}
+	RpWidget *accessibilityParent() const override;
 
 	[[nodiscard]] const style::PopupMenu &st() const {
 		return _st;
@@ -67,6 +81,7 @@ public:
 	not_null<QAction*> insertAction(
 		int position,
 		base::unique_qptr<Menu::ItemBase> widget);
+	void removeAction(int position);
 	void clearActions();
 
 	[[nodiscard]] const std::vector<not_null<QAction*>> &actions() const;
@@ -79,6 +94,9 @@ public:
 
 	void deleteOnHide(bool del);
 	void popup(const QPoint &p);
+	[[nodiscard]] static QPoint ConstrainToParentScreen(
+		not_null<PopupMenu*> menu,
+		QPoint globalPos);
 	bool prepareGeometryFor(const QPoint &p);
 	void popupPrepared();
 	void hideMenu(bool fast = false);
@@ -87,6 +105,8 @@ public:
 	void setForcedOrigin(PanelAnimation::Origin origin);
 	void setForcedVerticalOrigin(VerticalOrigin origin);
 	void setAdditionalMenuPadding(QMargins padding, QMargins margins);
+	[[nodiscard]] QMargins additionalMenuPadding() const;
+	[[nodiscard]] QMargins additionalMenuMargins() const;
 
 	[[nodiscard]] PanelAnimation::Origin preparedOrigin() const;
 	[[nodiscard]] QMargins preparedPadding() const;
@@ -120,6 +140,10 @@ public:
 
 	void setClearLastSeparator(bool clear);
 
+	void stashContent(Fn<void(not_null<PopupMenu*>)> fillNew);
+	void swapStashed(SwitchDirection direction);
+	[[nodiscard]] bool hasStashedContent() const;
+
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	void focusOutEvent(QFocusEvent *e) override;
@@ -147,6 +171,8 @@ private:
 	void opacityAnimationCallback();
 
 	void init();
+
+	void finishSwitchAnimation();
 
 	void hideFinished();
 	void showStarted();
@@ -178,13 +204,17 @@ private:
 		not_null<PopupMenu*> submenu,
 		int actionTop,
 		TriggeredSource source);
-	bool prepareGeometryFor(const QPoint &p, PopupMenu *parent);
+	bool prepareGeometryFor(
+		const QPoint &p,
+		PopupMenu *parent,
+		QWidget *parentActionWidget);
 	void showPrepared(TriggeredSource source);
 	void updateRoundingOverlay();
 
 	const style::PopupMenu &_st;
 
 	RoundRect _roundRect;
+	BoxShadow _boxShadow;
 	object_ptr<ScrollArea> _scroll;
 	not_null<Menu::Menu*> _menu;
 	object_ptr<RpWidget> _roundingOverlay = { nullptr };
@@ -222,10 +252,36 @@ private:
 	bool _reactivateParent = true;
 	bool _grabbingForPanelAnimation = false;
 
+	int _touchBeginCounter = 0;
 	int _topShift = 0;
 	bool _clearLastSeparator = true;
+	bool _keepingDelayedActivationPaused = false;
 
 	Fn<void()> _destroyedCallback;
+
+	struct StashedContent {
+		object_ptr<QWidget> wrap = { nullptr };
+		not_null<Menu::Menu*> menu;
+	};
+	std::unique_ptr<StashedContent> _stashedContent;
+
+	void setupMenuWidget();
+	void swapWithStashed();
+	[[nodiscard]] int computePositionShift(int targetScrollHeight) const;
+
+	struct SwitchState {
+		QPixmap oldSnapshot;
+		QPixmap newSnapshot;
+		object_ptr<RpWidget> overlay = { nullptr };
+		Animations::Simple animation;
+		int fromScrollHeight = 0;
+		int toScrollHeight = 0;
+		int positionShift = 0;
+		int baseY = 0;
+		SwitchDirection direction = SwitchDirection::LeftToRight;
+	};
+	std::unique_ptr<SwitchState> _switchState;
+	void startSwitchAnimation(not_null<SwitchState*> raw, float64 from);
 
 };
 

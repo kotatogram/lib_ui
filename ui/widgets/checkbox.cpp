@@ -7,8 +7,8 @@
 #include "ui/widgets/checkbox.h"
 
 #include "ui/effects/ripple_animation.h"
+#include "ui/screen_reader_mode.h"
 #include "ui/basic_click_handlers.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/ui_utility.h"
 #include "ui/painter.h"
 #include "styles/palette.h"
@@ -17,23 +17,6 @@
 #include <QtCore/QtMath>
 
 namespace Ui {
-namespace {
-
-TextParseOptions _checkboxOptions = {
-	TextParseMultiline, // flags
-	0, // maxw
-	0, // maxh
-	Qt::LayoutDirectionAuto, // dir
-};
-
-TextParseOptions _checkboxRichOptions = {
-	TextParseMultiline, // flags
-	0, // maxw
-	0, // maxh
-	Qt::LayoutDirectionAuto, // dir
-};
-
-} // namespace
 
 AbstractCheckView::AbstractCheckView(int duration, bool checked, Fn<void()> updateCallback)
 : _duration(duration)
@@ -304,7 +287,7 @@ Fn<void()> CheckView::PrepareNonToggledError(
 	view->checkedChanges(
 	) | rpl::filter([=](bool checked) {
 		return checked;
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		state->error = false;
 		view->setUntoggledOverride(std::nullopt);
 	}, lifetime);
@@ -331,6 +314,68 @@ Fn<void()> CheckView::PrepareNonToggledError(
 			1.,
 			st::defaultCheck.duration);
 	};
+}
+
+RoundCheckView::RoundCheckView(
+	const style::Check &st,
+	bool checked,
+	Fn<void()> updateCallback)
+: AbstractCheckView(st.duration, checked, std::move(updateCallback))
+, _st(&st) {
+}
+
+QSize RoundCheckView::getSize() const {
+	return QSize(_st->diameter, _st->diameter);
+}
+
+void RoundCheckView::setStyle(const style::Check &st) {
+	_st = &st;
+}
+
+void RoundCheckView::paint(QPainter &p, int left, int top, int outerWidth) {
+	auto toggled = currentAnimationValue();
+	auto pen = _untoggledOverride
+		? anim::pen(*_untoggledOverride, _st->toggledFg, toggled)
+		: anim::pen(_st->untoggledFg, _st->toggledFg, toggled);
+	pen.setWidth(_st->thickness);
+	p.setPen(pen);
+	p.setBrush(anim::brush(
+		_st->bg,
+		(_untoggledOverride
+			? anim::color(*_untoggledOverride, _st->toggledFg, toggled)
+			: anim::color(_st->untoggledFg, _st->toggledFg, toggled)),
+		toggled));
+
+	{
+		PainterHighQualityEnabler hq(p);
+		const auto remove = _st->thickness / 2.;
+		p.drawEllipse(style::rtlrect(
+			QRectF(left, top, _st->diameter, _st->diameter).marginsRemoved(
+				QMarginsF(remove, remove, remove, remove)), outerWidth));
+	}
+
+	if (toggled > 0) {
+		_st->icon.paint(p, QPoint(left, top), outerWidth);
+	}
+}
+
+QSize RoundCheckView::rippleSize() const {
+	return getSize()
+		+ 2 * QSize(_st->rippleAreaPadding, _st->rippleAreaPadding);
+}
+
+QImage RoundCheckView::prepareRippleMask() const {
+	return RippleAnimation::EllipseMask(rippleSize());
+}
+
+bool RoundCheckView::checkRippleStartPosition(QPoint position) const {
+	return QRect(QPoint(0, 0), rippleSize()).contains(position);
+}
+
+void RoundCheckView::setUntoggledOverride(
+		std::optional<QColor> untoggledOverride) {
+	_untoggledOverride = untoggledOverride;
+	update();
 }
 
 RadioView::RadioView(
@@ -515,27 +560,15 @@ Checkbox::Checkbox(
 , _text(
 		_st.style,
 		QString(),
-		_checkboxOptions,
+		kDefaultTextOptions,
 		_st.style.font->elidew) {
 	_check->setUpdateCallback([=] { update(); });
 	resizeToText();
 	setCursor(style::cur_pointer);
 	std::move(
 		text
-	) | rpl::start_with_next([=](TextWithEntities &&value) {
-		if (value.entities.empty()) {
-			setText(base::take(value.text));
-		} else {
-			_text.setMarkedText(
-				_st.style,
-				std::move(value),
-				_checkboxRichOptions);
-			resizeToText();
-			if (_text.hasLinks()) {
-				setMouseTracking(true);
-			}
-			update();
-		}
+	) | rpl::on_next([=](const TextWithEntities &value) {
+		setMarkedText(value);
 	}, lifetime());
 }
 
@@ -564,9 +597,15 @@ QRect Checkbox::checkRect() const {
 	}, size);
 }
 
-void Checkbox::setText(const QString &text, bool rich) {
-	_text.setText(_st.style, text, rich ? _checkboxRichOptions : _checkboxOptions);
+void Checkbox::setText(const QString &text) {
+	setMarkedText({ text });
+}
+
+void Checkbox::setMarkedText(const TextWithEntities &text) {
+	_text.setMarkedText(_st.style, text);
+	accessibilityNameChanged();
 	resizeToText();
+	setMouseTracking(_text.hasLinks());
 	update();
 }
 
@@ -622,16 +661,14 @@ rpl::producer<bool> Checkbox::checkedValue() const {
 }
 
 void Checkbox::resizeToText() {
-	if (_st.width <= 0) {
-		resizeToWidth(_text.maxWidth() - _st.width);
-	} else {
-		resizeToWidth(_st.width);
-	}
+	updateNaturalWidth();
+	resizeToWidth(width(), true);
 }
 
 void Checkbox::setChecked(bool checked, NotifyAboutChange notify) {
 	if (_check->checked() != checked) {
 		_check->setChecked(checked, anim::type::normal);
+		accessibilityStateChanged({ .checked = true });
 		if (notify == NotifyAboutChange::Notify) {
 			_checkedChanges.fire_copy(checked);
 		}
@@ -642,15 +679,17 @@ void Checkbox::finishAnimating() {
 	_check->finishAnimating();
 }
 
-int Checkbox::naturalWidth() const {
-	if (_st.width > 0) {
-		return _st.width;
-	}
-	auto result = _st.checkPosition.x() + _check->getSize().width();
-	if (!_text.isEmpty()) {
-		result += _st.textPosition.x() + _text.maxWidth();
-	}
-	return result - _st.width;
+void Checkbox::updateNaturalWidth() {
+	setNaturalWidth([&] {
+		if (_st.width > 0) {
+			return _st.width;
+		}
+		auto result = _st.checkPosition.x() + _check->getSize().width();
+		if (!_text.isEmpty()) {
+			result += _st.textPosition.x() + _text.maxWidth();
+		}
+		return result - _st.width;
+	}());
 }
 
 void Checkbox::paintEvent(QPaintEvent *e) {
@@ -774,7 +813,7 @@ void Checkbox::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void Checkbox::mouseReleaseEvent(QMouseEvent *e) {
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	if (auto activated = _activatingHandler = ClickHandler::unpressed()) {
 		// _clickHandlerFilter may delete `this`. In that case we don't want
 		// to try to show a context menu or smth like that.
@@ -905,7 +944,7 @@ void RadiobuttonGroup::setValue(int value) {
 	}
 	_hasValue = true;
 	_value = value;
-	for (const auto button : _buttons) {
+	for (const auto &button : _buttons) {
 		button->handleNewGroupValue(_value);
 	}
 	const auto guard = weak_from_this();
@@ -917,13 +956,13 @@ void RadiobuttonGroup::setValue(int value) {
 	}
 }
 
-void RadiobuttonGroup::registerButton(Radiobutton *button) {
+void RadiobuttonGroup::registerButton(not_null<Radiobutton*> button) {
 	if (!base::contains(_buttons, button)) {
 		_buttons.push_back(button);
 	}
 }
 
-void RadiobuttonGroup::unregisterButton(Radiobutton *button) {
+void RadiobuttonGroup::unregisterButton(not_null<Radiobutton*> button) {
 	_buttons.erase(ranges::remove(_buttons, button), _buttons.end());
 }
 
@@ -966,8 +1005,48 @@ Radiobutton::Radiobutton(
 	checkbox()->checkedChanges(
 	) | rpl::filter(
 		_1
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_group->setValue(_value);
+	}, lifetime());
+
+	trackScreenReaderState();
+}
+
+void Radiobutton::trackScreenReaderState() {
+	if (checkbox()->checked() && Ui::ScreenReaderModeActive()) {
+		for (const auto &button : _group->_buttons) {
+			if (button != this) {
+				button->setFocusPolicy(Qt::NoFocus);
+			}
+		}
+	}
+
+	auto maybeValue = _group->value() | rpl::map([=](int v) {
+		return std::make_optional(v);
+	});
+	rpl::combine(
+		Ui::ScreenReaderModeActiveValue(),
+		(_group->hasValue()
+			? (std::move(maybeValue) | rpl::type_erased)
+			: rpl::single(
+				std::optional<int>()
+			) | rpl::then(std::move(maybeValue)))
+	) | rpl::map([=](bool screenReaderActive, std::optional<int> value) {
+		if (!screenReaderActive || !value.has_value()) {
+			return Qt::NoFocus;
+		} else if (value == _value) {
+			return Qt::StrongFocus;
+		}
+		for (const auto &button : _group->_buttons) {
+			if (button->_value == value) {
+				return Qt::NoFocus;
+			}
+		}
+		return Qt::StrongFocus;
+	}) | rpl::on_next([=](Qt::FocusPolicy value) {
+		if (focusPolicy() != value) {
+			setFocusPolicy(value);
+		}
 	}, lifetime());
 }
 
@@ -986,8 +1065,92 @@ void Radiobutton::handlePress() {
 	}
 }
 
+void Radiobutton::keyPressEvent(QKeyEvent *e) {
+	const auto key = e->key();
+	const auto vertical = (key == Qt::Key_Up || key == Qt::Key_Down);
+	const auto horizontal = (key == Qt::Key_Left || key == Qt::Key_Right);
+
+	if (!vertical && !horizontal) {
+		return Checkbox::keyPressEvent(e);
+	}
+
+	const auto &buttons = _group->_buttons;
+	if (buttons.size() < 2) {
+		e->ignore();
+		return;
+	}
+
+	const auto i = ranges::find(buttons, not_null(this));
+	if (i == end(buttons)) {
+		e->ignore();
+		return;
+	}
+
+	const auto currentIndex = std::distance(begin(buttons), i);
+	const auto neighbor = (currentIndex > 0)
+		? buttons[currentIndex - 1]
+		: buttons[currentIndex + 1];
+
+	const auto deltaY = std::abs(neighbor->y() - y());
+	const auto deltaX = std::abs(neighbor->x() - x());
+	const auto orientation = (deltaY > deltaX)
+		? Qt::Vertical
+		: Qt::Horizontal;
+
+	if ((orientation == Qt::Vertical && !vertical)
+		|| (orientation == Qt::Horizontal && !horizontal)) {
+		e->ignore();
+		return;
+	}
+
+	const auto step = (key == Qt::Key_Down || key == Qt::Key_Right) ? 1 : -1;
+	const auto nextIndex = currentIndex + step;
+
+	if (nextIndex >= 0 && nextIndex < buttons.size()) {
+		const auto nextButton = buttons[nextIndex];
+		const auto weak = base::make_weak(nextButton);
+		_group->setValue(nextButton->_value);
+		if (const auto strong = weak.get()) {
+			strong->setFocus(Qt::OtherFocusReason);
+		}
+	}
+}
+
 Radiobutton::~Radiobutton() {
 	_group->unregisterButton(this);
+}
+
+AccessibilityState Checkbox::accessibilityState() const {
+	return { .checkable = true, .checked = checked() };
+}
+
+void Checkbox::accessibilityDoAction(const QString &name) {
+	if (name == QAccessibleActionInterface::pressAction()) {
+		if (!isDisabled()) {
+			handlePress();
+		}
+	}
+}
+
+bool Checkbox::isSubmitEvent(not_null<QKeyEvent*> e) const {
+	return !e->isAutoRepeat()
+		&& (e->key() == Qt::Key_Space
+			|| e->key() == Qt::Key_Return
+			|| e->key() == Qt::Key_Enter);
+}
+
+void Checkbox::keyPressEvent(QKeyEvent *e) {
+	if (!isSubmitEvent(e)) {
+		RippleButton::keyPressEvent(e);
+	}
+}
+
+void Checkbox::keyReleaseEvent(QKeyEvent *e) {
+	if (isSubmitEvent(e)) {
+		handlePress();
+	} else {
+		RippleButton::keyReleaseEvent(e);
+	}
 }
 
 } // namespace Ui

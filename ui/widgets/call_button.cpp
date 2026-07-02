@@ -103,11 +103,12 @@ void CallButton::setText(rpl::producer<QString> text) {
 	_label->show();
 	rpl::combine(
 		sizeValue(),
-		_label->sizeValue()
-	) | rpl::start_with_next([=](QSize my, QSize label) {
+		_label->naturalWidthValue()
+	) | rpl::on_next([=](QSize my, int naturalWidth) {
+		_label->resizeToWidth(std::min(my.width(), naturalWidth));
 		_label->moveToLeft(
-			(my.width() - label.width()) / 2,
-			my.height() - label.height(),
+			(my.width() - _label->width()) / 2,
+			my.height() - _label->height(),
 			my.width());
 	}, _label->lifetime());
 }
@@ -236,7 +237,7 @@ void CallButton::onStateChanged(State was, StateChangeSource source) {
 void CallButton::setColorOverrides(rpl::producer<CallButtonColors> &&colors) {
 	std::move(
 		colors
-	) | rpl::start_with_next([=](const CallButtonColors &c) {
+	) | rpl::on_next([=](const CallButtonColors &c) {
 		_bgOverride = c.bg;
 		_rippleOverride = c.ripple;
 		update();

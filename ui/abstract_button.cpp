@@ -7,7 +7,6 @@
 #include "ui/abstract_button.h"
 
 #include "ui/ui_utility.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/integration.h"
 
 #include <QtGui/QtEvents>
@@ -23,7 +22,7 @@ AbstractButton::AbstractButton(QWidget *parent) : RpWidget(parent) {
 	using namespace rpl::mappers;
 	shownValue()
 		| rpl::filter(_1 == false)
-		| rpl::start_with_next([this] { clearState(); }, lifetime());
+		| rpl::on_next([this] { clearState(); }, lifetime());
 }
 
 void AbstractButton::leaveEventHook(QEvent *e) {
@@ -32,16 +31,17 @@ void AbstractButton::leaveEventHook(QEvent *e) {
 	}
 
 	setOver(false, StateChangeSource::ByHover);
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void AbstractButton::enterEventHook(QEnterEvent *e) {
 	checkIfOver(mapFromGlobal(QCursor::pos()));
-	return TWidget::enterEventHook(e);
+	return RpWidget::enterEventHook(e);
 }
 
-void AbstractButton::setAcceptBoth(bool acceptBoth) {
+void AbstractButton::setAcceptBoth(bool acceptBoth, bool triggerOnPress) {
 	_acceptBoth = acceptBoth;
+	_triggerOnPress = triggerOnPress;
 }
 
 void AbstractButton::checkIfOver(QPoint localPos) {
@@ -82,11 +82,48 @@ void AbstractButton::mouseReleaseEvent(QMouseEvent *e) {
 	}
 }
 
+bool AbstractButton::isSubmitEvent(not_null<QKeyEvent*> e) const {
+	return !e->isAutoRepeat()
+		&& (e->key() == Qt::Key_Space
+			|| e->key() == Qt::Key_Return
+			|| e->key() == Qt::Key_Enter);
+}
+
+void AbstractButton::keyPressEvent(QKeyEvent *e) {
+	if (isSubmitEvent(e)) {
+		setDown(
+			true,
+			StateChangeSource::ByPress,
+			e->modifiers(),
+			Qt::LeftButton);
+		e->accept();
+	} else {
+		RpWidget::keyPressEvent(e);
+	}
+}
+
+void AbstractButton::keyReleaseEvent(QKeyEvent *e) {
+	if (isSubmitEvent(e)) {
+		e->accept();
+		if (isDown()) {
+			setDown(
+				false,
+				StateChangeSource::ByPress,
+				e->modifiers(),
+				Qt::LeftButton);
+
+			clicked(e->modifiers(), Qt::LeftButton);
+		}
+	} else {
+		RpWidget::keyReleaseEvent(e);
+	}
+}
+
 void AbstractButton::clicked(
 		Qt::KeyboardModifiers modifiers,
 		Qt::MouseButton button) {
 	_modifiers = modifiers;
-	const auto weak = MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	if (button == Qt::LeftButton) {
 		if (const auto callback = _clickedCallback) {
 			callback();
@@ -131,15 +168,25 @@ bool AbstractButton::setDown(
 		&& (_acceptBoth || button == Qt::LeftButton)) {
 		auto was = _state;
 		_state |= StateFlag::Down;
+
+		const auto weak = base::make_weak(this);
 		onStateChanged(was, source);
+		if (weak) {
+			accessibilityStateChanged({ .pressed = true });
+		}
+		if (_triggerOnPress && button != Qt::LeftButton) {
+			_state &= ~State(StateFlag::Down);
+			clicked(modifiers, button);
+		}
 		return true;
 	} else if (!down && (_state & StateFlag::Down)) {
 		const auto was = _state;
 		_state &= ~State(StateFlag::Down);
 
-		const auto weak = MakeWeak(this);
+		const auto weak = base::make_weak(this);
 		onStateChanged(was, source);
 		if (weak) {
+			accessibilityStateChanged({ .pressed = true });
 			if (was & StateFlag::Over) {
 				clicked(modifiers, button);
 			} else {
@@ -174,6 +221,18 @@ void AbstractButton::clearState() {
 	auto was = _state;
 	_state = StateFlag::None;
 	onStateChanged(was, StateChangeSource::ByUser);
+}
+
+AccessibilityState AbstractButton::accessibilityState() const {
+	return { .pressed = isDown() };
+}
+
+void AbstractButton::accessibilityDoAction(const QString &name) {
+	if (name == QAccessibleActionInterface::pressAction()) {
+		if (!isDisabled()) {
+			clicked(Qt::NoModifier, Qt::LeftButton);
+		}
+	}
 }
 
 } // namespace Ui

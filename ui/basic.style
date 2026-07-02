@@ -9,6 +9,7 @@ using "ui/colors.palette";
 TextPalette {
 	linkFg: color;
 	monoFg: color;
+	markBg: color;
 	spoilerFg: color;
 	selectBg: color;
 	selectFg: color;
@@ -40,6 +41,7 @@ TextStyle {
 	font: font;
 	linkUnderline: int;
 	lineHeight: pixels;
+	qtextEditLineMetrics: bool;
 	blockquote: QuoteStyle;
 	pre: QuoteStyle;
 }
@@ -59,9 +61,16 @@ emojiPadding: 1px;
 
 lineWidth: 1px;
 
+IconEmoji {
+	icon: icon;
+	padding: margins;
+	useIconColor: bool;
+}
+
 defaultTextPalette: TextPalette {
 	linkFg: windowActiveTextFg;
 	monoFg: msgInMonoFg;
+	markBg: windowBgOver;
 	spoilerFg: msgInDateFg;
 	selectBg: msgInBgSelected;
 	selectFg: transparent; // use painter current pen instead
@@ -76,6 +85,7 @@ defaultTextStyle: TextStyle {
 	font: normalFont;
 	linkUnderline: kLinkUnderlineActive;
 	lineHeight: 0px;
+	qtextEditLineMetrics: false;
 	blockquote: defaultQuoteStyle;
 	pre: defaultQuoteStyle;
 }

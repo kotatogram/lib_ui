@@ -54,25 +54,51 @@ public:
 	template <
 		typename Widget,
 		typename = std::enable_if_t<
-		std::is_base_of_v<RpWidget, Widget>>>
+			std::is_base_of_v<RpWidget, Widget>>>
 	Widget *insertRow(
 			int atPosition,
 			object_ptr<Widget> &&child,
-			const style::margins &margin = st::boxRowPadding) {
+			const style::margins &margin = st::boxRowPadding,
+			style::align align = style::al_left) {
 		return _content->insert(
 			atPosition,
 			std::move(child),
-			margin);
+			margin,
+			align);
 	}
 
 	template <
 		typename Widget,
 		typename = std::enable_if_t<
-		std::is_base_of_v<RpWidget, Widget>>>
+			std::is_base_of_v<RpWidget, Widget>>>
+	Widget *insertRow(
+			int atPosition,
+			object_ptr<Widget> &&child,
+			style::align align) {
+		return _content->insert(
+			atPosition,
+			std::move(child),
+			st::boxRowPadding,
+			align);
+	}
+
+	template <
+		typename Widget,
+		typename = std::enable_if_t<
+			std::is_base_of_v<RpWidget, Widget>>>
 	Widget *addRow(
 			object_ptr<Widget> &&child,
-			const style::margins &margin = st::boxRowPadding) {
-		return _content->add(std::move(child), margin);
+			const style::margins &margin = st::boxRowPadding,
+			style::align align = style::al_left) {
+		return _content->add(std::move(child), margin, align);
+	}
+
+	template <
+		typename Widget,
+		typename = std::enable_if_t<
+			std::is_base_of_v<RpWidget, Widget>>>
+	Widget *addRow(object_ptr<Widget> &&child, style::align align) {
+		return _content->add(std::move(child), st::boxRowPadding, align);
 	}
 
 	void addSkip(int height);
@@ -103,6 +129,8 @@ public:
 	}
 
 	[[nodiscard]] not_null<Ui::VerticalLayout*> verticalLayout();
+
+	void animateHeightFrom(int wasHeight);
 
 	using BoxContent::setNoContentMargin;
 
@@ -136,6 +164,7 @@ private:
 		object_ptr<Ui::RpWidget> content);
 	not_null<Ui::RpWidget*> doSetPinnedToBottomContent(
 		object_ptr<Ui::RpWidget> content);
+	void updateDimensions();
 
 	FnMut<void(not_null<GenericBox*>)> _init;
 	Fn<void()> _focus;
@@ -148,6 +177,9 @@ private:
 	int _width = 0;
 	int _minHeight = 0;
 	int _maxHeight = 0;
+	int _desiredHeight = 0;
+	int _animateHeightFrom = 0;
+	Ui::Animations::Simple _heightAnimation;
 
 	object_ptr<Ui::RpWidget> _pinnedToTopContent = { nullptr };
 	object_ptr<Ui::RpWidget> _pinnedToBottomContent = { nullptr };

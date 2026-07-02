@@ -32,20 +32,14 @@ void GenericBox::prepare() {
 		pinnedToTop ? pinnedToTop->heightValue() : rpl::single(0),
 		wrap->heightValue(),
 		pinnedToBottom ? pinnedToBottom->heightValue() : rpl::single(0)
-	) | rpl::start_with_next([=](int top, int height, int bottom) {
+	) | rpl::on_next([=](int top, int height, int bottom) {
 		Expects(_minHeight >= 0);
 		Expects(!_maxHeight || _minHeight <= _maxHeight);
 
 		setInnerTopSkip(top);
 		setInnerBottomSkip(bottom);
-		const auto desired = top + height + bottom;
-		setDimensions(
-			currentWidth,
-			std::clamp(
-				desired,
-				_minHeight,
-				_maxHeight ? _maxHeight : std::max(_minHeight, desired)),
-			true);
+		_desiredHeight = top + height + bottom;
+		updateDimensions();
 	}, wrap->lifetime());
 
 	setInnerWidget(
@@ -58,7 +52,7 @@ void GenericBox::prepare() {
 		rpl::combine(
 			heightValue(),
 			pinnedToBottom->heightValue()
-		) | rpl::start_with_next([=](int outer, int height) {
+		) | rpl::on_next([=](int outer, int height) {
 			pinnedToBottom->move(0, outer - height);
 		}, pinnedToBottom->lifetime());
 	}
@@ -66,6 +60,27 @@ void GenericBox::prepare() {
 	if (const auto onstack = _initScroll) {
 		onstack();
 	}
+}
+
+void GenericBox::updateDimensions() {
+	const auto target = std::clamp(
+		_desiredHeight,
+		_minHeight,
+		_maxHeight ? _maxHeight : std::max(_minHeight, _desiredHeight));
+	const auto height = _heightAnimation.animating()
+		? anim::interpolate(
+			_animateHeightFrom,
+			target,
+			_heightAnimation.value(1.))
+		: target;
+	setDimensions(width(), height, true);
+}
+
+void GenericBox::animateHeightFrom(int wasHeight) {
+	_animateHeightFrom = wasHeight;
+	_heightAnimation.start([=] {
+		updateDimensions();
+	}, 0., 1., st::slideWrapDuration);
 }
 
 void GenericBox::addSkip(int height) {

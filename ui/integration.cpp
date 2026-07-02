@@ -50,7 +50,7 @@ bool Integration::screenIsLocked() {
 
 std::shared_ptr<ClickHandler> Integration::createLinkHandler(
 		const EntityLinkData &data,
-		const std::any &context) {
+		const Text::MarkedContext &context) {
 	switch (data.type) {
 	case EntityType::CustomUrl:
 		return !data.data.isEmpty()
@@ -64,16 +64,6 @@ std::shared_ptr<ClickHandler> Integration::createLinkHandler(
 				data.shown == EntityLinkShown::Full)
 			: nullptr;
 	}
-	return nullptr;
-}
-
-std::unique_ptr<Text::CustomEmoji> Integration::createCustomEmoji(
-		QStringView data,
-		const std::any &context) {
-	return nullptr;
-}
-
-Fn<void()> Integration::createSpoilerRepaint(const std::any &context) {
 	return nullptr;
 }
 
@@ -166,6 +156,10 @@ QString Integration::phraseFormattingSpoiler() {
 	return "Spoiler";
 }
 
+QString Integration::phraseFormattingDate() {
+	return "Date";
+}
+
 QString Integration::phraseButtonOk() {
 	return "OK";
 }
@@ -216,6 +210,18 @@ QString Integration::phraseBotAllowWriteConfirm() {
 
 QString Integration::phraseQuoteHeaderCopy() {
 	return "copy";
+}
+
+QString Integration::phraseMinimize() {
+	return "Minimize";
+}
+
+QString Integration::phraseMaximize() {
+	return "Maximize";
+}
+
+QString Integration::phraseRestore() {
+	return "Restore";
 }
 
 } // namespace Ui

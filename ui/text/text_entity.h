@@ -9,10 +9,23 @@
 #include "base/qt/qt_compare.h"
 #include "base/basic_types.h"
 #include "base/algorithm.h"
+#include "base/flags.h"
 
 #include <QtCore/QList>
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
+
+struct TextWithEntities;
+
+namespace style {
+struct IconEmoji;
+} // namespace style
+
+namespace Ui::Text {
+[[nodiscard]] TextWithEntities IconEmoji(
+	not_null<const style::IconEmoji*> emoji,
+	QString text);
+} // namespace Ui::Text
 
 enum class EntityType : uchar {
 	Invalid = 0,
@@ -29,6 +42,7 @@ enum class EntityType : uchar {
 	MediaTimestamp,
 	Colorized, // Senders in chat list, attachments in chat list, etc.
 	Phone,
+	BankCard,
 
 	Bold,
 	Semibold,
@@ -39,7 +53,28 @@ enum class EntityType : uchar {
 	Pre,  // block
 	Blockquote,
 	Spoiler,
+	Subscript,
+	Superscript,
+	Marked,
+	FormattedDate,
 };
+
+enum class FormattedDateFlag : uint8 {
+	Relative   = 0x01,
+	ShortTime  = 0x02,
+	LongTime   = 0x04,
+	ShortDate  = 0x08,
+	LongDate   = 0x10,
+	DayOfWeek  = 0x20,
+};
+inline constexpr bool is_flag_type(FormattedDateFlag) { return true; }
+using FormattedDateFlags = base::flags<FormattedDateFlag>;
+
+[[nodiscard]] QString SerializeFormattedDateData(
+	int32 date,
+	FormattedDateFlags flags);
+[[nodiscard]] std::pair<int32, FormattedDateFlags> DeserializeFormattedDateData(
+	const QString &data);
 
 enum class EntityLinkShown : uchar {
 	Full,
@@ -183,6 +218,11 @@ struct TextWithEntities {
 		text.append(other);
 		return *this;
 	}
+	TextWithEntities &append(
+			const style::IconEmoji &icon,
+			const QString &text = QString()) {
+		return append(Ui::Text::IconEmoji(&icon, text));
+	}
 
 	static TextWithEntities Simple(const QString &simple) {
 		auto result = TextWithEntities();
@@ -317,6 +357,7 @@ QString SingleLine(const QString &text);
 TextWithEntities SingleLine(const TextWithEntities &text);
 QString RemoveAccents(const QString &text);
 QString RemoveEmoji(const QString &text);
+QString NameSortKey(const QString &text);
 QStringList PrepareSearchWords(const QString &query, const QRegularExpression *SplitterOverride = nullptr);
 bool CutPart(TextWithEntities &sending, TextWithEntities &left, int limit);
 
@@ -364,6 +405,11 @@ inline const auto kMentionTagStart = qstr("mention://");
 [[nodiscard]] bool IsMentionLink(QStringView link);
 [[nodiscard]] QString MentionEntityData(QStringView link);
 [[nodiscard]] bool IsSeparateTag(QStringView tag);
+[[nodiscard]] QString FormattedDateMetaTag(const QString &data);
+[[nodiscard]] bool IsFormattedDateMetaTag(QStringView tag);
+[[nodiscard]] QString FormattedDateMetaTagData(QStringView tag);
+[[nodiscard]] bool IsRichFormattingTag(QStringView tag);
+[[nodiscard]] bool IsRichLinkTag(QStringView tag);
 [[nodiscard]] QString JoinTag(const QList<QStringView> &list);
 [[nodiscard]] QList<QStringView> SplitTags(QStringView tag);
 [[nodiscard]] QString TagWithRemoved(

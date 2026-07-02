@@ -6,6 +6,7 @@
 //
 #include "emoji_config.h"
 
+#include "ui/widgets/fields/input_field.h"
 #include "emoji_suggestions_helper.h"
 #include "base/bytes.h"
 #include "base/openssl_help.h"
@@ -32,8 +33,8 @@ constexpr auto kUniversalSize = 72;
 constexpr auto kImagesPerRow = 32;
 constexpr auto kImageRowsPerSprite = 16;
 
-constexpr auto kSetVersion = uint32(6);
-constexpr auto kCacheVersion = uint32(8);
+constexpr auto kSetVersion = uint32(7);
+constexpr auto kCacheVersion = uint32(9);
 constexpr auto kMaxId = uint32(1 << 8);
 
 #ifdef Q_OS_MAC
@@ -485,6 +486,9 @@ QImage UniversalImages::generate(int size, int index) const {
 
 void Init() {
 	internal::Init();
+
+	// Pre-warm InstantReplaces trie on background thread.
+	crl::async([] { InstantReplaces::Default(); });
 
 	const auto count = internal::FullCount();
 	const auto persprite = kImagesPerRow * kImageRowsPerSprite;

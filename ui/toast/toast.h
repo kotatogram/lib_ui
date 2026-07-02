@@ -8,13 +8,15 @@
 
 #include "base/object_ptr.h"
 #include "base/weak_ptr.h"
-#include "ui/effects/animations.h"
-#include "ui/text/text_entity.h"
 #include "ui/click_handler.h"
+#include "ui/effects/animations.h"
 #include "ui/rect_part.h"
 #include "ui/rp_widget.h"
+#include "ui/style/style_core_types.h"
+#include "ui/text/text.h"
+#include "ui/text/text_entity.h"
 
-#include <any>
+#include <optional>
 
 namespace style {
 struct Toast;
@@ -26,19 +28,27 @@ extern const style::Toast &defaultMultilineToast;
 
 namespace Ui::Toast {
 
+struct Config;
+
+using ClickHandlerFilter = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
+using ToastIconFactory = Fn<object_ptr<RpWidget>(
+	not_null<RpWidget*> parent,
+	const Config &config)>;
+
 namespace internal {
 class Manager;
 class Widget;
+[[nodiscard]] object_ptr<RpWidget> MakeIconByFactory(
+	not_null<RpWidget*> parent,
+	const Config &config);
 } // namespace internal
-
-using ClickHandlerFilter = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
 
 inline constexpr auto kDefaultDuration = crl::time(1500);
 struct Config {
 	// Default way of composing the content, a FlatLabel.
 	QString title;
 	TextWithEntities text;
-	Fn<std::any(not_null<QWidget*>)> textContext;
+	Text::MarkedContext textContext;
 	ClickHandlerFilter filter;
 	int maxlines = 16;
 	bool singleline = false;
@@ -46,10 +56,27 @@ struct Config {
 	// Custom way of composing any content.
 	object_ptr<RpWidget> content = { nullptr };
 
-	rpl::producer<QMargins> padding = nullptr;
+	// Simple icon fields.
+	const style::icon *icon = nullptr;
+
+	// Lottie fields.
+	QString iconLottie;
+	std::optional<style::size> iconLottieSize;
+	anim::repeat iconLottieRepeat = anim::repeat::once;
+
+	// Generic icon-content fields.
+	object_ptr<RpWidget> iconContent = { nullptr };
+
+	// Common fields.
+	style::align iconAlign = style::al_left;
+	std::optional<style::margins> iconPadding;
+
+	rpl::producer<QMargins> padding;
 
 	not_null<const style::Toast*> st = &st::defaultMultilineToast;
 	RectPart attach = RectPart::None;
+	rpl::producer<int> addToAttachSide;
+
 	bool dark = false;
 	bool adaptive = false;
 	bool acceptinput = false;
@@ -59,6 +86,7 @@ struct Config {
 };
 
 void SetDefaultParent(not_null<QWidget*> parent);
+void AddIconFactory(ToastIconFactory factory);
 
 class Instance final : public base::has_weak_ptr {
 	struct Private {

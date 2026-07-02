@@ -6,6 +6,39 @@
 //
 #include "ui/text/text_custom_emoji.h"
 
+#include "ui/style/style_core.h"
+#include "ui/text/text.h"
+#include "ui/text/text_utilities.h"
+#include "ui/emoji_config.h"
+
+namespace Ui::Emoji {
+
+int GetCustomSizeNormal() {
+	const auto full = GetSizeNormal();
+	const auto esize = full / style::DevicePixelRatio();
+	return Ui::Text::AdjustCustomEmojiSize(esize);
+}
+
+int GetCustomSizeLarge() {
+	const auto full = GetSizeLarge();
+	const auto esize = full / style::DevicePixelRatio();
+	return Ui::Text::AdjustCustomEmojiSize(esize);
+}
+
+int GetCustomSkipNormal() {
+	const auto full = GetSizeNormal();
+	const auto esize = full / style::DevicePixelRatio();
+	return (esize - GetCustomSizeNormal()) / 2;
+}
+
+int GetCustomSkipLarge() {
+	const auto full = GetSizeLarge();
+	const auto esize = full / style::DevicePixelRatio();
+	return (esize - GetCustomSizeLarge()) / 2;
+}
+
+} // namespace Ui::Emoji
+
 namespace Ui::Text {
 
 int AdjustCustomEmojiSize(int emojiSize) {
@@ -17,6 +50,7 @@ ShiftedEmoji::ShiftedEmoji(
 	QPoint shift)
 : _wrapped(std::move(wrapped))
 , _shift(shift) {
+	Expects(_wrapped != nullptr);
 }
 
 int ShiftedEmoji::width() {
@@ -25,6 +59,19 @@ int ShiftedEmoji::width() {
 
 QString ShiftedEmoji::entityData() {
 	return _wrapped->entityData();
+}
+
+std::optional<CustomEmojiVerticalMetrics> ShiftedEmoji::vertical(
+	const style::TextStyle &st) {
+	return _wrapped->vertical(st);
+}
+
+QString ShiftedEmoji::replacementText() {
+	return _wrapped->replacementText();
+}
+
+CustomEmojiSemantics ShiftedEmoji::semantics() {
+	return _wrapped->semantics();
 }
 
 void ShiftedEmoji::paint(QPainter &p, const Context &context) {
@@ -47,6 +94,7 @@ bool ShiftedEmoji::readyInDefaultState() {
 
 FirstFrameEmoji::FirstFrameEmoji(std::unique_ptr<CustomEmoji> wrapped)
 : _wrapped(std::move(wrapped)) {
+	Expects(_wrapped != nullptr);
 }
 
 int FirstFrameEmoji::width() {
@@ -55,6 +103,19 @@ int FirstFrameEmoji::width() {
 
 QString FirstFrameEmoji::entityData() {
 	return _wrapped->entityData();
+}
+
+std::optional<CustomEmojiVerticalMetrics> FirstFrameEmoji::vertical(
+	const style::TextStyle &st) {
+	return _wrapped->vertical(st);
+}
+
+QString FirstFrameEmoji::replacementText() {
+	return _wrapped->replacementText();
+}
+
+CustomEmojiSemantics FirstFrameEmoji::semantics() {
+	return _wrapped->semantics();
 }
 
 void FirstFrameEmoji::paint(QPainter &p, const Context &context) {
@@ -83,6 +144,7 @@ LimitedLoopsEmoji::LimitedLoopsEmoji(
 : _wrapped(std::move(wrapped))
 , _limit(limit)
 , _stopOnLast(stopOnLast) {
+	Expects(_wrapped != nullptr);
 }
 
 int LimitedLoopsEmoji::width() {
@@ -91,6 +153,19 @@ int LimitedLoopsEmoji::width() {
 
 QString LimitedLoopsEmoji::entityData() {
 	return _wrapped->entityData();
+}
+
+std::optional<CustomEmojiVerticalMetrics> LimitedLoopsEmoji::vertical(
+	const style::TextStyle &st) {
+	return _wrapped->vertical(st);
+}
+
+QString LimitedLoopsEmoji::replacementText() {
+	return _wrapped->replacementText();
+}
+
+CustomEmojiSemantics LimitedLoopsEmoji::semantics() {
+	return _wrapped->semantics();
 }
 
 void LimitedLoopsEmoji::paint(QPainter &p, const Context &context) {
@@ -135,6 +210,68 @@ bool LimitedLoopsEmoji::ready() {
 
 bool LimitedLoopsEmoji::readyInDefaultState() {
 	return _wrapped->readyInDefaultState();
+}
+
+std::unique_ptr<CustomEmoji> MakeCustomEmoji(
+		QStringView data,
+		const MarkedContext &context) {
+	if (auto simple = TryMakeSimpleEmoji(data)) {
+		return simple;
+	} else if (const auto &factory = context.customEmojiFactory) {
+		return factory(data, context);
+	}
+	return nullptr;
+}
+
+PaletteDependentCustomEmoji::PaletteDependentCustomEmoji(
+	Fn<QImage()> factory,
+	QString entity,
+	QMargins padding)
+: _factory(std::move(factory))
+, _entity(std::move(entity))
+, _padding(padding) {
+}
+
+int PaletteDependentCustomEmoji::width() {
+	if (_frame.isNull()) {
+		validateFrame();
+	}
+	return _padding.left()
+		+ (_frame.width() / style::DevicePixelRatio())
+		+ _padding.right();
+}
+
+QString PaletteDependentCustomEmoji::entityData() {
+	return _entity;
+}
+
+void PaletteDependentCustomEmoji::paint(
+		QPainter &p,
+		const Context &context) {
+	validateFrame();
+	p.drawImage(
+		context.position + QPoint(_padding.left(), _padding.top()),
+		_frame);
+}
+
+void PaletteDependentCustomEmoji::unload() {
+	_frame = QImage();
+}
+
+bool PaletteDependentCustomEmoji::ready() {
+	return true;
+}
+
+bool PaletteDependentCustomEmoji::readyInDefaultState() {
+	return true;
+}
+
+void PaletteDependentCustomEmoji::validateFrame() {
+	const auto version = style::PaletteVersion();
+	if (_frame.isNull() || _paletteVersion != version) {
+		_paletteVersion = version;
+		_frame = _factory();
+	}
 }
 
 } // namespace Ui::Text

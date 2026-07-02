@@ -17,12 +17,16 @@ namespace Ui {
 
 class RippleAnimation;
 
+[[nodiscard]] QImage SideBarLockIcon(const style::color &fg);
+
 class SideBarButton final : public Ui::RippleButton {
 public:
 	SideBarButton(
 		not_null<QWidget*> parent,
-		const QString &title,
-		const style::SideBarButton &st);
+		const TextWithEntities &title,
+		const style::SideBarButton &st,
+		Text::MarkedContext context = {},
+		Fn<bool()> paused = nullptr);
 
 	void setActive(bool active);
 	void setBadge(const QString &badge, bool muted);
@@ -35,6 +39,12 @@ public:
 
 	[[nodiscard]] bool locked() const;
 
+	QString accessibilityName() override {
+		return !_badge.isEmpty()
+			? u"%1 (%2)"_q.arg(_text.toString(), _badge.toString())
+			: _text.toString();
+	}
+
 private:
 	void paintEvent(QPaintEvent *e) override;
 
@@ -45,7 +55,6 @@ private:
 	const style::SideBarButton &_st;
 	const style::icon *_iconOverride = nullptr;
 	const style::icon *_iconOverrideActive = nullptr;
-	const QPen _arcPen;
 	Ui::Text::String _text;
 	Ui::Text::String _badge;
 	QImage _iconCache;
@@ -53,6 +62,9 @@ private:
 	int _iconCacheBadgeWidth = 0;
 	bool _active = false;
 	bool _badgeMuted = false;
+
+	Fn<bool()> _paused;
+	Text::MarkedContext _context;
 
 	struct {
 		bool locked = false;

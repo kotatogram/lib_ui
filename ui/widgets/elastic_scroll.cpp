@@ -8,7 +8,6 @@
 
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
-#include "ui/qt_weak_factory.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt/qt_common_adapters.h"
 #include "styles/style_widgets.h"
@@ -25,8 +24,6 @@ constexpr auto kOverscrollReturnDuration = crl::time(250);
 constexpr auto kOverscrollFromThreshold = -(1 << 30);
 constexpr auto kOverscrollTillThreshold = (1 << 30);
 constexpr auto kTouchOverscrollMultiplier = 2;
-constexpr auto kMagicScrollMultiplier = 2.5;
-constexpr auto kDefaultWheelScrollLines = 3;
 
 constexpr auto kLogA = 16.;
 constexpr auto kLogB = 10.;
@@ -70,6 +67,10 @@ ElasticScrollBar::ElasticScrollBar(
 }
 
 void ElasticScrollBar::refreshGeometry() {
+	if (_st.barHidden) {
+		hide();
+		return;
+	}
 	update();
 	const auto skip = _st.deltax;
 	const auto fullSkip = _st.deltat + _st.deltab;
@@ -205,7 +206,7 @@ void ElasticScrollBar::updateState(ScrollState state) {
 }
 
 void ElasticScrollBar::paintEvent(QPaintEvent *e) {
-	if (_bar.isEmpty()) {
+	if (_bar.isEmpty() || _st.barHidden) {
 		hide();
 		return;
 	}
@@ -360,7 +361,7 @@ ElasticScroll::ElasticScroll(
 	setAttribute(Qt::WA_AcceptTouchEvents);
 
 	_bar->visibleFromDragged(
-	) | rpl::start_with_next([=](int from) {
+	) | rpl::on_next([=](int from) {
 		tryScrollTo(from, false);
 	}, _bar->lifetime());
 }
@@ -406,6 +407,10 @@ bool ElasticScroll::viewportEvent(QEvent *e) {
 		return true;
 	}
 	return false;
+}
+
+QWidget *ElasticScroll::viewport() const {
+	return _widget;
 }
 
 void ElasticScroll::touchDeaccelerate(int32 elapsed) {
@@ -596,7 +601,24 @@ void ElasticScroll::touchResetSpeed() {
 }
 
 bool ElasticScroll::eventHook(QEvent *e) {
-	return filterOutTouchEvent(e) || RpWidget::eventHook(e);
+	if (filterOutTouchEvent(e)) {
+		if (e->type() == QEvent::TouchCancel
+			&& !_touchDisabled
+			&& _widget
+			&& _widget->testAttribute(Qt::WA_AcceptTouchEvents)) {
+			// If touch was cancelled for me, send the cancel
+			// event to the widget as well.
+			//
+			// In case scroll owner handled touch himself using
+			// _customTouchProcess hook and wants to cancel any
+			// actions here, we want to cancel them in widget too.
+			QTouchEvent ev(QEvent::TouchCancel);
+			ev.setTimestamp(crl::now());
+			QGuiApplication::sendEvent(_widget, &ev);
+		}
+		return true;
+	}
+	return RpWidget::eventHook(e);
 }
 
 void ElasticScroll::wheelEvent(QWheelEvent *e) {
@@ -660,8 +682,10 @@ bool ElasticScroll::handleWheelEvent(not_null<QWheelEvent*> e, bool touch) {
 			(unmultiplied.x() * std::max(width(), 120) / 120.),
 			(unmultiplied.y() * std::max(height(), 120) / 120.))
 		: unmultiplied;
-	auto delta = _vertical ? -pixels.y() : pixels.x();
+	auto ignore = false;
+	auto delta = _vertical ? -pixels.y() : -pixels.x();
 	if (std::abs(_vertical ? pixels.x() : pixels.y()) >= std::abs(delta)) {
+		ignore = true;
 		delta = 0;
 	}
 	if (_ignoreMomentumFromOverscroll) {
@@ -697,7 +721,7 @@ bool ElasticScroll::handleWheelEvent(not_null<QWheelEvent*> e, bool touch) {
 		applyScrollTo(normalTo);
 	}
 	if (!delta) {
-		return true;
+		return !ignore;
 	}
 	if (touch) {
 		delta *= kTouchOverscrollMultiplier;
@@ -736,7 +760,7 @@ bool ElasticScroll::eventFilter(QObject *obj, QEvent *e) {
 		if (filterOutTouchEvent(e)) {
 			return true;
 		} else if (e->type() == QEvent::Resize) {
-			const auto weak = Ui::MakeWeak(this);
+			const auto weak = base::make_weak(this);
 			updateState();
 			if (weak) {
 				_innerResizes.fire({});
@@ -783,12 +807,14 @@ void ElasticScroll::handleTouchEvent(QTouchEvent *e) {
 		_touchPress = true;
 		if (_touchScrollState == TouchScrollState::Auto) {
 			_touchScrollState = TouchScrollState::Acceleration;
+			_touchMaybePressing = false;
 			_touchWaitingAcceleration = true;
 			_touchAccelerationTime = crl::now();
 			touchUpdateSpeed();
 			_touchStart = _touchPosition;
 		} else {
 			_touchScroll = false;
+			_touchMaybePressing = true;
 			_touchTimer.callOnce(QApplication::startDragTime());
 		}
 		_touchStart = _touchPreviousPosition = _touchPosition;
@@ -805,6 +831,7 @@ void ElasticScroll::handleTouchEvent(QTouchEvent *e) {
 				>= QApplication::startDragDistance())) {
 			_touchTimer.cancel();
 			_touchScroll = true;
+			_touchMaybePressing = false;
 			touchUpdateSpeed();
 		}
 		if (_touchScroll) {
@@ -825,7 +852,7 @@ void ElasticScroll::handleTouchEvent(QTouchEvent *e) {
 			return;
 		}
 		_touchPress = false;
-		auto weak = MakeWeak(this);
+		auto weak = base::make_weak(this);
 		if (_touchScroll) {
 			if (_touchScrollState == TouchScrollState::Manual) {
 				_touchScrollState = TouchScrollState::Auto;
@@ -859,12 +886,14 @@ void ElasticScroll::handleTouchEvent(QTouchEvent *e) {
 		if (weak) {
 			_touchTimer.cancel();
 			_touchRightButton = false;
+			_touchMaybePressing = false;
 		}
 	} break;
 
 	case QEvent::TouchCancel: {
 		_touchPress = false;
 		_touchScroll = false;
+		_touchMaybePressing = false;
 		_touchScrollState = TouchScrollState::Manual;
 		_touchTimer.cancel();
 	} break;
@@ -937,7 +966,7 @@ void ElasticScroll::setState(ScrollState state) {
 		_position = Position{ _state.visibleFrom, _overscroll };
 		return;
 	}
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	const auto old = _state.visibleFrom;
 	_state = state;
 	_bar->updateState(state);
@@ -945,9 +974,7 @@ void ElasticScroll::setState(ScrollState state) {
 		_position = Position{ _state.visibleFrom, _overscroll };
 	}
 	if (weak && _state.visibleFrom != old) {
-		if (_vertical) {
-			_scrollTopUpdated.fire_copy(_state.visibleFrom);
-		}
+		_scrollValueUpdated.fire_copy(_state.visibleFrom);
 		if (weak) {
 			_scrolls.fire({});
 		}
@@ -958,7 +985,7 @@ void ElasticScroll::applyScrollTo(int position, bool synthMouseMove) {
 	if (_disabled) {
 		return;
 	}
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	_dirtyState = true;
 	const auto was = _widget->geometry();
 	_widget->move(
@@ -1037,14 +1064,23 @@ void ElasticScroll::sendWheelEvent(Qt::ScrollPhase phase, QPoint delta) {
 	handleWheelEvent(&e, true);
 }
 
+void ElasticScroll::setBarTopInset(int inset) {
+	if (_barTopInset == inset) {
+		return;
+	}
+	_barTopInset = inset;
+	auto event = QResizeEvent(size(), size());
+	resizeEvent(&event);
+}
+
 void ElasticScroll::resizeEvent(QResizeEvent *e) {
 	const auto rtl = (layoutDirection() == Qt::RightToLeft);
 	_bar->setGeometry(_vertical
 		? QRect(
 			(rtl ? 0 : (width() - _st.width)),
-			0,
+			_barTopInset,
 			_st.width,
-			height())
+			std::max(0, height() - _barTopInset))
 		: QRect(0, height() - _st.width, width(), _st.width));
 	_geometryChanged.fire({});
 	updateState();
@@ -1178,6 +1214,10 @@ void ElasticScroll::updateBars() {
 	_bar->update();
 }
 
+QWidget *ElasticScroll::widget() const {
+	return _widget.data();
+}
+
 void ElasticScroll::setOverscrollTypes(
 		OverscrollType from,
 		OverscrollType till) {
@@ -1288,6 +1328,10 @@ rpl::producer<ElasticScrollMovement> ElasticScroll::movementValue() const {
 	return _movement.value();
 }
 
+rpl::producer<bool> ElasticScroll::touchMaybePressing() const {
+	return _touchMaybePressing.value();
+}
+
 int OverscrollFromAccumulated(int accumulated) {
 	if (!accumulated) {
 		return 0;
@@ -1303,26 +1347,6 @@ int OverscrollToAccumulated(int overscroll) {
 	}
 	return (overscroll > 0 ? 1. : -1.)
 		* int(base::SafeRound(RawTo(std::abs(overscroll))));
-}
-
-QPointF ScrollDeltaF(not_null<QWheelEvent*> e, bool touch) {
-	const auto convert = [](QPointF point) {
-		return QPointF(
-			style::ConvertScaleExact(point.x()),
-			style::ConvertScaleExact(point.y()));
-	};
-	if (!e->pixelDelta().isNull()) {
-		return convert(e->pixelDelta())
-			* ((Platform::IsWayland() && !touch)
-				? kMagicScrollMultiplier
-				: 1.);
-	}
-	return (convert(e->angleDelta()) * QApplication::wheelScrollLines())
-		/ float64(kPixelToAngleDelta * kDefaultWheelScrollLines);
-}
-
-QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch) {
-	return ScrollDeltaF(e, touch).toPoint();
 }
 
 } // namespace Ui

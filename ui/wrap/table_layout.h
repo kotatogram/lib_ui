@@ -22,6 +22,11 @@ namespace Ui {
 class TableLayout : public RpWidget {
 public:
 	TableLayout(QWidget *parent, const style::Table &st = st::defaultTable);
+	~TableLayout();
+
+	[[nodiscard]] const style::Table &st() const {
+		return _st;
+	}
 
 	[[nodiscard]] int rowsCount() const {
 		return _rows.size();

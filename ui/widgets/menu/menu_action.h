@@ -17,11 +17,23 @@ namespace Ui::Menu {
 class Action : public ItemBase {
 public:
 	Action(
-		not_null<RpWidget*> parent,
+		not_null<Menu*> parent,
 		const style::Menu &st,
 		not_null<QAction*> action,
 		const style::icon *icon,
 		const style::icon *iconOver);
+
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::MenuItem;
+	}
+	QString accessibilityName() override {
+		return _action->text();
+	}
+	int accessibilityChildCount() const override;
+	QAccessible::Role accessibilityChildRole() const override;
+	QAccessible::State accessibilityChildState(int index) const override;
+
+	[[nodiscard]] const style::Menu &st() const;
 
 	bool isEnabled() const override;
 	not_null<QAction*> action() const override;
@@ -31,6 +43,11 @@ public:
 	void setIcon(
 		const style::icon *icon,
 		const style::icon *iconOver = nullptr);
+
+	void setMarkedText(
+		TextWithEntities text,
+		QString shortcut,
+		const Text::MarkedContext &context = {});
 
 protected:
 	void paintEvent(QPaintEvent *e) override;

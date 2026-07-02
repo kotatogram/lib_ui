@@ -6,7 +6,6 @@
 //
 #include "ui/wrap/slide_wrap.h"
 
-#include "ui/qt_weak_factory.h"
 #include "ui/ui_utility.h"
 #include "styles/style_basic.h"
 
@@ -67,6 +66,9 @@ SlideWrap<RpWidget> *SlideWrap<RpWidget>::toggle(
 				_toggled ? 1. : 0.,
 				_duration,
 				anim::linear);
+			if (_finishedCallback) {
+				_animation.setFinishedCallback(_finishedCallback);
+			}
 		}
 	}
 	if (animate) {
@@ -76,6 +78,15 @@ SlideWrap<RpWidget> *SlideWrap<RpWidget>::toggle(
 	}
 	if (changed) {
 		_toggledChanged.fire_copy(_toggled);
+	}
+	return this;
+}
+
+SlideWrap<RpWidget> *SlideWrap<RpWidget>::setFinishedCallback(
+		Fn<void()> callback) {
+	_finishedCallback = std::move(callback);
+	if (_animation.animating()) {
+		_animation.setFinishedCallback(_finishedCallback);
 	}
 	return this;
 }
@@ -91,7 +102,7 @@ SlideWrap<RpWidget> *SlideWrap<RpWidget>::toggleOn(
 		anim::type animated) {
 	std::move(
 		shown
-	) | rpl::start_with_next([=](bool shown) {
+	) | rpl::on_next([=](bool shown) {
 		toggle(shown, animated);
 	}, lifetime());
 	finishAnimating();
@@ -129,7 +140,7 @@ void SlideWrap<RpWidget>::animationStep() {
 	}
 	const auto shouldBeHidden = !_toggled && !_animation.animating();
 	if (shouldBeHidden != isHidden()) {
-		const auto guard = MakeWeak(this);
+		const auto guard = base::make_weak(this);
 		setVisible(!shouldBeHidden || _minimalHeight);
 		if (shouldBeHidden && guard) {
 			SendPendingMoveResizeEvents(this);
@@ -173,6 +184,12 @@ rpl::producer<bool> MultiSlideTracker::atLeastOneShownValue() const {
 		[](const std::vector<bool> &values) {
 			return ranges::find(values, true) != values.end();
 		});
+}
+
+rpl::producer<bool> MultiSlideTracker::atLeastOneShownValueLater() const {
+	return _widgetAdded.events() | rpl::map([=] {
+		return atLeastOneShownValue();
+	}) | rpl::flatten_latest();
 }
 
 } // namespace Ui

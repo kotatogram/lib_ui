@@ -21,14 +21,10 @@ namespace Ui::GL {
 
 class Renderer {
 public:
-	virtual void init(
-		not_null<QOpenGLWidget*> widget,
-		QOpenGLFunctions &f) {
+	virtual void init(QOpenGLFunctions &f) {
 	}
 
-	virtual void deinit(
-		not_null<QOpenGLWidget*> widget,
-		QOpenGLFunctions *f) {
+	virtual void deinit(QOpenGLFunctions *f) {
 	}
 
 	virtual void resize(
@@ -47,7 +43,7 @@ public:
 	}
 
 	virtual void paintFallback(
-		Painter &&p,
+		Painter &p,
 		const QRegion &clip,
 		Backend backend) {
 	}
@@ -66,5 +62,15 @@ struct ChosenRenderer {
 [[nodiscard]] std::unique_ptr<RpWidgetWrap> CreateSurface(
 	QWidget *parent,
 	ChosenRenderer chosen);
+
+[[nodiscard]] std::unique_ptr<RpWidgetWrap> CreateSurfaceRhi(
+	QWidget *parent,
+	std::unique_ptr<Renderer> renderer);
+
+void EnsureWindowRhi(not_null<QWidget*> window);
+
+[[nodiscard]] bool WindowUsesRhi(not_null<QWidget*> widget);
+
+void LogWindowRhi(const char *tag, not_null<QWidget*> widget);
 
 } // namespace Ui::GL

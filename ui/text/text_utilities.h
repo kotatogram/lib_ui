@@ -8,25 +8,19 @@
 
 #include "ui/text/text_entity.h"
 
-namespace Ui {
-namespace Text {
-namespace details {
+namespace style {
+struct IconEmoji;
+} // namespace style
 
-struct ToUpperType {
-	inline QString operator()(const QString &text) const {
-		return text.toUpper();
-	}
-	inline QString operator()(QString &&text) const {
-		return std::move(text).toUpper();
-	}
-};
+namespace Ui::Text {
 
-} // namespace details
+class CustomEmoji;
 
-inline constexpr auto Upper = details::ToUpperType{};
 [[nodiscard]] TextWithEntities Bold(const QString &text);
 [[nodiscard]] TextWithEntities Semibold(const QString &text);
 [[nodiscard]] TextWithEntities Italic(const QString &text);
+[[nodiscard]] TextWithEntities Underline(const QString &text);
+[[nodiscard]] TextWithEntities StrikeOut(const QString &text);
 [[nodiscard]] TextWithEntities Link(
 	const QString &text,
 	const QString &url = u"internal:action"_q);
@@ -37,10 +31,12 @@ inline constexpr auto Upper = details::ToUpperType{};
 [[nodiscard]] TextWithEntities Link(TextWithEntities text, int index);
 [[nodiscard]] TextWithEntities Colorized(
 	const QString &text,
-	int index = 0);
+	int index = 0,
+	int backgroundIndex = 0);
 [[nodiscard]] TextWithEntities Colorized(
 	TextWithEntities text,
-	int index = 0);
+	int index = 0,
+	int backgroundIndex = 0);
 [[nodiscard]] TextWithEntities Wrapped(
 	TextWithEntities text,
 	EntityType type,
@@ -54,35 +50,12 @@ inline constexpr auto Upper = details::ToUpperType{};
 	QString data,
 	QString text = QString());
 
-[[nodiscard]] inline auto ToUpper() {
-	return rpl::map(Upper);
-}
+[[nodiscard]] TextWithEntities IconEmoji(
+	not_null<const style::IconEmoji*> emoji,
+	QString text = QString());
 
-[[nodiscard]] inline auto ToBold() {
-	return rpl::map(Bold);
-}
-
-[[nodiscard]] inline auto ToSemibold() {
-	return rpl::map(Semibold);
-}
-
-[[nodiscard]] inline auto ToItalic() {
-	return rpl::map(Italic);
-}
-
-[[nodiscard]] inline auto ToLink(const QString &url = "internal:action") {
-	return rpl::map([=](const auto &text) {
-		return Link(text, url);
-	});
-}
-
-[[nodiscard]] inline auto ToRichLangValue() {
-	return rpl::map(RichLangValue);
-}
-
-[[nodiscard]] inline auto ToWithEntities() {
-	return rpl::map(WithEntities);
-}
+[[nodiscard]] std::unique_ptr<CustomEmoji> TryMakeSimpleEmoji(
+	QStringView data);
 
 [[nodiscard]] TextWithEntities Mid(
 	const TextWithEntities &text,
@@ -92,5 +65,12 @@ inline constexpr auto Upper = details::ToUpperType{};
 	const TextWithEntities &result,
 	const std::vector<EntityType> &types);
 
-} // namespace Text
-} // namespace Ui
+[[nodiscard]] QString FixAmpersandInAction(QString text);
+
+[[nodiscard]] TextWithEntities WrapEmailPattern(const QString &);
+
+[[nodiscard]] QList<QStringView> Words(QStringView lower);
+
+[[nodiscard]] QString StripUrlProtocol(const QString &link);
+
+} // namespace Ui::Text

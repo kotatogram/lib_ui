@@ -12,15 +12,24 @@ namespace anim {
 enum class type : uchar;
 } // namespace anim
 
+namespace base {
+template <typename T>
+class unique_qptr;
+} // namespace base
+
 namespace style {
+struct PopupMenu;
 struct MenuSeparator;
 } // namespace style
 
 namespace Ui {
+class RpWidget;
 class PopupMenu;
 } // namespace Ui
 
 namespace Ui::Menu {
+
+class ItemBase;
 
 struct MenuCallback final {
 public:
@@ -29,8 +38,9 @@ public:
 		Fn<void()> handler;
 		const style::icon *icon;
 		const style::MenuSeparator *separatorSt = nullptr;
-		Fn<void(not_null<Ui::PopupMenu*>)> fillSubmenu;
-		Fn<bool()> triggerFilter;
+		FnMut<void(not_null<Ui::PopupMenu*>)> fillSubmenu;
+		FnMut<base::unique_qptr<ItemBase>(not_null<PopupMenu*>)> make;
+		const style::PopupMenu *submenuSt = nullptr;
 		rpl::producer<anim::type> hideRequests;
 		int addTopShift = 0;
 		bool isSeparator = false;

@@ -8,6 +8,9 @@
 
 #include "base/algorithm.h"
 #include "base/qt/qt_string_view.h"
+#include "ui/text/custom_emoji_instance.h"
+#include "ui/text/text_custom_emoji.h"
+#include "styles/style_basic.h"
 
 #include <QtCore/QRegularExpression>
 
@@ -15,13 +18,87 @@ namespace Ui {
 namespace Text {
 namespace {
 
-TextWithEntities WithSingleEntity(
+struct IconEmojiData {
+	base::flat_map<not_null<const style::IconEmoji*>, int> indices;
+	std::vector<not_null<const style::IconEmoji*>> list;
+};
+
+[[nodiscard]] TextWithEntities WithSingleEntity(
 		const QString &text,
 		EntityType type,
 		const QString &data = QString()) {
 	auto result = TextWithEntities{ text };
 	result.entities.push_back({ type, 0, int(text.size()), data });
 	return result;
+}
+
+[[nodiscard]] QString ColorizedEntityData(int index, int backgroundIndex) {
+	if (!index && !backgroundIndex) {
+		return QString();
+	}
+	auto result = QString();
+	result.reserve(backgroundIndex ? 2 : 1);
+	result.push_back(QChar(index));
+	if (backgroundIndex) {
+		result.push_back(QChar(backgroundIndex));
+	}
+	return result;
+}
+
+[[nodiscard]] IconEmojiData &IconEmojiInfo() {
+	static IconEmojiData result;
+	return result;
+}
+
+[[nodiscard]] QString IconEmojiPrefix() {
+	return u"icon-emoji-"_q;
+}
+
+class IconEmojiObject final : public CustomEmoji {
+public:
+	explicit IconEmojiObject(not_null<const style::IconEmoji*> emoji);
+
+	int width() override;
+	QString entityData() override;
+	void paint(QPainter &p, const Context &context) override;
+	void unload() override;
+	bool ready() override;
+	bool readyInDefaultState() override;
+
+private:
+	const not_null<const style::IconEmoji*> _emoji;
+	Ui::CustomEmoji::IconEmojiFrameCache _cache;
+
+};
+
+IconEmojiObject::IconEmojiObject(not_null<const style::IconEmoji*> emoji)
+: _emoji(emoji) {
+}
+
+int IconEmojiObject::width() {
+	return _emoji->padding.left()
+		+ _emoji->icon.width()
+		+ _emoji->padding.right();
+}
+
+QString IconEmojiObject::entityData() {
+	return IconEmojiPrefix()
+		+ QString::number(IconEmojiInfo().indices[_emoji]);
+}
+
+void IconEmojiObject::paint(QPainter &p, const Context &context) {
+	Ui::CustomEmoji::PaintIconEmoji(p, context, _emoji, _cache);
+}
+
+void IconEmojiObject::unload() {
+}
+
+bool IconEmojiObject::ready() {
+	return true;
+}
+
+bool IconEmojiObject::readyInDefaultState() {
+	return true;
 }
 
 } // namespace
@@ -36,6 +113,14 @@ TextWithEntities Semibold(const QString &text) {
 
 TextWithEntities Italic(const QString &text) {
 	return WithSingleEntity(text, EntityType::Italic);
+}
+
+TextWithEntities Underline(const QString &text) {
+	return WithSingleEntity(text, EntityType::Underline);
+}
+
+TextWithEntities StrikeOut(const QString &text) {
+	return WithSingleEntity(text, EntityType::StrikeOut);
 }
 
 TextWithEntities Link(const QString &text, const QString &url) {
@@ -54,13 +139,19 @@ TextWithEntities Link(TextWithEntities text, int index) {
 	return Link(std::move(text), u"internal:index"_q + QChar(index));
 }
 
-TextWithEntities Colorized(const QString &text, int index) {
-	const auto data = index ? QString(QChar(index)) : QString();
+TextWithEntities Colorized(
+		const QString &text,
+		int index,
+		int backgroundIndex) {
+	const auto data = ColorizedEntityData(index, backgroundIndex);
 	return WithSingleEntity(text, EntityType::Colorized, data);
 }
 
-TextWithEntities Colorized(TextWithEntities text, int index) {
-	const auto data = index ? QString(QChar(index)) : QString();
+TextWithEntities Colorized(
+		TextWithEntities text,
+		int index,
+		int backgroundIndex) {
+	const auto data = ColorizedEntityData(index, backgroundIndex);
 	return Wrapped(std::move(text), EntityType::Colorized, data);
 }
 
@@ -107,10 +198,42 @@ TextWithEntities RichLangValue(const QString &text) {
 }
 
 TextWithEntities SingleCustomEmoji(QString data, QString text) {
+	if (text.isEmpty()) {
+		text = u"@"_q;
+	}
 	return {
-		text.isEmpty() ? u"@"_q : text,
-		{ EntityInText(EntityType::CustomEmoji, 0, 1, data) },
+		text,
+		{ EntityInText(EntityType::CustomEmoji, 0, text.size(), data)},
 	};
+}
+
+TextWithEntities IconEmoji(
+		not_null<const style::IconEmoji*> emoji,
+		QString text) {
+	const auto index = [&] {
+		auto &info = IconEmojiInfo();
+		const auto count = int(info.list.size());
+		auto i = info.indices.emplace(emoji, count).first;
+		if (i->second == count) {
+			info.list.push_back(emoji);
+		}
+		return i->second;
+	}();
+	return SingleCustomEmoji(
+		IconEmojiPrefix() + QString::number(index),
+		text);
+}
+
+std::unique_ptr<CustomEmoji> TryMakeSimpleEmoji(QStringView data) {
+	const auto prefix = IconEmojiPrefix();
+	if (!data.startsWith(prefix)) {
+		return nullptr;
+	}
+	auto &info = IconEmojiInfo();
+	const auto index = data.mid(prefix.size()).toInt();
+	return (index >= 0 && index < info.list.size())
+		? std::make_unique<IconEmojiObject>(info.list[index])
+		: nullptr;
 }
 
 TextWithEntities Mid(const TextWithEntities &text, int position, int n) {
@@ -154,6 +277,39 @@ TextWithEntities Filtered(
 		return ranges::contains(types, entity.type());
 	}) | ranges::to<EntitiesInText>();
 	return { .text = text.text, .entities = std::move(result) };
+}
+
+QString FixAmpersandInAction(QString text) {
+	return text.replace('&', u"&&"_q);
+}
+
+TextWithEntities WrapEmailPattern(const QString &pattern) {
+	constexpr auto kHidden = '*';
+	const auto from = int(pattern.indexOf(kHidden));
+	const auto to = int(pattern.lastIndexOf(kHidden));
+
+	if (from != -1 && to != -1 && from <= to) {
+		const auto length = to - from + 1;
+		auto result = TextWithEntities{ pattern };
+		result.entities.push_back({ EntityType::Spoiler, from, length });
+		return result;
+	}
+	return { pattern };
+}
+
+QList<QStringView> Words(QStringView lower) {
+	static const auto kRegWords = QRegularExpression(
+		u"[\\W]"_q,
+		QRegularExpression::UseUnicodePropertiesOption);
+	return lower.split(kRegWords, Qt::SkipEmptyParts);
+}
+
+QString StripUrlProtocol(const QString &link) {
+	return link.startsWith(u"https://"_q)
+		? link.mid(8)
+		: link.startsWith(u"http://"_q)
+		? link.mid(7)
+		: link;
 }
 
 } // namespace Text

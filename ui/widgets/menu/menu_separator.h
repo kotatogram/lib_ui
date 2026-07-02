@@ -20,10 +20,14 @@ namespace Ui::Menu {
 class Separator : public ItemBase {
 public:
 	Separator(
-		not_null<RpWidget*> parent,
+		not_null<Menu*> parent,
 		const style::Menu &st,
 		const style::MenuSeparator &separator,
 		not_null<QAction*> action);
+
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::Separator;
+	}
 
 	not_null<QAction*> action() const override;
 	bool isEnabled() const override;

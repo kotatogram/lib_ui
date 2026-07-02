@@ -61,11 +61,15 @@ private:
 		int16 paragraphIndex,
 		Qt::LayoutDirection direction);
 	void initNextLine();
+	void resolveLineGeometry(uint16 lineEnd);
 	void initParagraphBidi();
 	bool drawLine(
 		uint16 lineEnd,
 		Blocks::const_iterator blocksEnd);
-	[[nodiscard]] FixedRange findSelectEmojiRange(
+	bool drawLinePostprocessed(
+		uint16 lineEnd,
+		Blocks::const_iterator blocksEnd);
+	[[nodiscard]] FixedRange findSelectObjectRange(
 		const QScriptItem &si,
 		std::vector<Block>::const_iterator blockIt,
 		QFixed x,
@@ -79,6 +83,7 @@ private:
 		const QTextItemInt &gf,
 		TextSelection selection) const;
 	void fillSelectRange(FixedRange range);
+	void fillSelectRange(FixedRange range, int top, int height);
 	void pushHighlightRange(FixedRange range);
 	void pushSpoilerRange(
 		FixedRange range,
@@ -134,6 +139,8 @@ private:
 	const QPen *_currentPen = nullptr;
 	const QPen *_currentPenSelected = nullptr;
 	struct {
+		const QBrush *brush = nullptr;
+		const QBrush *brushSelected = nullptr;
 		bool spoiler = false;
 		bool selectActiveBlock = false; // For monospace.
 	} _background;
@@ -187,9 +194,10 @@ private:
 	int _startLineWidth = 0;
 	QFixed _x, _wLeft, _last_rPadding;
 	int _y = 0;
-	int _yDelta = 0;
+	QFixed _yDelta = 0;
 	int _lineIndex = 0;
 	int _lineHeight = 0;
+	QFixed _lineAscent = 0;
 	int _fontHeight = 0;
 	bool _breakEverywhere = false;
 	bool _elidedLine = false;
@@ -214,6 +222,8 @@ private:
 	StateResult _lookupResult;
 
 	bool _elisionMiddle = false;
+
+	const LinePostprocess *_linePostprocess = nullptr;
 
 };
 

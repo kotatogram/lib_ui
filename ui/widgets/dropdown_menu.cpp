@@ -34,7 +34,7 @@ void DropdownMenu::init() {
 	InnerDropdown::setHiddenCallback([this] { hideFinish(); });
 
 	_menu->resizesFromInner(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		resizeToContent();
 	}, _menu->lifetime());
 	_menu->setActivatedCallback([this](const Menu::CallbackData &data) {
@@ -94,7 +94,9 @@ void DropdownMenu::handleActivated(const Menu::CallbackData &data) {
 
 void DropdownMenu::handleTriggered(const Menu::CallbackData &data) {
 	if (!popupSubmenuFromAction(data)) {
-		hideMenu();
+		if (!data.preventClose) {
+			hideMenu();
+		}
 		_triggering = true;
 		data.action->trigger();
 		_triggering = false;

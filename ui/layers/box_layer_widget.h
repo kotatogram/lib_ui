@@ -27,12 +27,15 @@ struct Box;
 namespace Ui {
 
 class AbstractButton;
+class BoxContent;
 class FlatLabel;
+class BoxLayerWidget;
 
 class BoxLayerWidget : public LayerWidget, public BoxContentDelegate {
 public:
 	BoxLayerWidget(
-		not_null<LayerStackWidget*> layer,
+		QWidget *parent,
+		not_null<LayerStackDelegate*> delegate,
 		object_ptr<BoxContent> content);
 	~BoxLayerWidget();
 
@@ -41,7 +44,9 @@ public:
 	void setLayerType(bool layerType) override;
 	void setStyle(const style::Box &st) override;
 	const style::Box &style() override;
-	void setTitle(rpl::producer<TextWithEntities> title) override;
+	void setTitle(
+		rpl::producer<TextWithEntities> title,
+		Text::MarkedContext context) override;
 	void setAdditionalTitle(rpl::producer<QString> additional) override;
 	void showBox(
 		object_ptr<BoxContent> box,
@@ -85,9 +90,17 @@ public:
 
 	void setCloseByOutsideClick(bool close) override;
 	bool closeByOutsideClick() const override;
+	bool closeByBackButton() override;
+	[[nodiscard]] crl::time animationDuration() const override {
+		return _content->layerAnimationDuration();
+	}
+
+	rpl::producer<int> layerHeightMaxValue() override;
+	rpl::producer<int> contentHeightMaxValue() override;
 
 protected:
 	void keyPressEvent(QKeyEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 
@@ -113,12 +126,15 @@ private:
 	[[nodiscard]] int countFullHeight() const;
 	[[nodiscard]] int countRealHeight() const;
 	[[nodiscard]] QRect loadingRect() const;
+	void updateMaxRealHeight();
 	void updateSize();
 
 	const style::Box *_st = nullptr;
-	not_null<LayerStackWidget*> _layer;
-	bool _layerType = false;
+	not_null<LayerStackDelegate*> _layer;
+	rpl::variable<int> _realHeightMax;
+	rpl::variable<int> _contentHeightMax;
 	int _fullHeight = 0;
+	bool _layerType = false;
 
 	bool _noContentMargin = false;
 	int _maxContentHeight = 0;
@@ -135,7 +151,7 @@ private:
 
 	std::vector<object_ptr<AbstractButton>> _buttons;
 	object_ptr<AbstractButton> _leftButton = { nullptr };
-	base::unique_qptr<AbstractButton> _topButton = { nullptr };
+	std::vector<base::unique_qptr<AbstractButton>> _topButtons;
 	std::unique_ptr<LoadingProgress> _loadingProgress;
 
 };

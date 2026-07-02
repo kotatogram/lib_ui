@@ -10,6 +10,7 @@
 #include "base/qthelp_regex.h"
 #include "base/crc32hash.h"
 #include "ui/text/text.h"
+#include "ui/text/text_html_tags.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/emoji_config.h"
 #include "ui/basic_click_handlers.h"
@@ -25,8 +26,75 @@ namespace TextUtilities {
 namespace {
 
 constexpr auto kTagSeparator = '\\';
+const auto kFormattedDateMetaTagPrefix = u"td-date-data-"_q;
 
 using namespace Ui::Text;
+
+[[nodiscard]] QString DecodeHexTagPayload(QStringView encoded) {
+	if (encoded.isEmpty() || (encoded.size() % 2)) {
+		return QString();
+	}
+	const auto normalized = encoded.toString().toLower();
+	const auto hex = normalized.toLatin1();
+	const auto bytes = QByteArray::fromHex(hex);
+	if (QString::fromLatin1(bytes.toHex()) != normalized) {
+		return QString();
+	}
+	const auto result = QString::fromUtf8(bytes);
+	return (result.toUtf8() == bytes) ? result : QString();
+}
+
+struct ParsedLinkTag {
+	EntityType type = EntityType::Invalid;
+	QString data;
+	QString identity;
+
+	[[nodiscard]] explicit operator bool() const {
+		return (type != EntityType::Invalid);
+	}
+
+	friend inline bool operator==(const ParsedLinkTag &, const ParsedLinkTag &)
+		= default;
+};
+
+[[nodiscard]] ParsedLinkTag ParseLinkTag(QStringView tag) {
+	if (IsMentionLink(tag)) {
+		const auto data = MentionEntityData(tag);
+		return data.isEmpty()
+			? ParsedLinkTag()
+			: ParsedLinkTag{ EntityType::MentionName, data };
+	} else if (Ui::InputField::IsCustomEmojiLink(tag)) {
+		const auto data = Ui::InputField::CustomEmojiEntityData(tag);
+		return data.isEmpty()
+			? ParsedLinkTag()
+			: ParsedLinkTag{ EntityType::CustomEmoji, data, tag.toString() };
+	} else if (Ui::InputField::IsCustomDateLink(tag)) {
+		return { EntityType::FormattedDate, tag.toString() };
+	} else if (Ui::InputField::IsValidMarkdownLink(tag)) {
+		return { EntityType::CustomUrl, tag.toString() };
+	} else if (Ui::InputField::IsInstantViewAnchorLink(tag)) {
+		return { EntityType::CustomUrl, tag.toString() };
+	}
+	return {};
+}
+
+[[nodiscard]] QString FormattedDateDataForTag(
+		QStringView visible,
+		const QString &metadata) {
+	const auto date = int32(base::StringViewMid(
+		visible,
+		Ui::InputField::kCustomDateTagStart.size()).toInt());
+	if (date <= 0) {
+		return QString();
+	}
+	auto useFlags = FormattedDateFlags();
+	const auto [savedDate, savedFlags] = DeserializeFormattedDateData(
+		metadata);
+	if (savedDate > 0) {
+		useFlags = savedFlags;
+	}
+	return SerializeFormattedDateData(date, useFlags);
+}
 
 QString ExpressionMailNameAtEnd() {
 	// Matches email first part (before '@') at the end of the string.
@@ -1170,7 +1238,10 @@ const QRegularExpression &RegExpWordSplit() {
 		if (till > offset) {
 			result.append(base::StringViewMid(original, offset, till - offset));
 		}
-		result.append(qstr(" (")).append(entity.data()).append(')');
+		const auto external = UrlClickHandler::ExternalUrlFromInternalUrl(
+			entity.data());
+		const auto url = external.isEmpty() ? entity.data() : external;
+		result.append(u" ("_q).append(url).append(')');
 		offset = till;
 	}
 	if (original.size() > offset) {
@@ -1181,13 +1252,17 @@ const QRegularExpression &RegExpWordSplit() {
 
 std::unique_ptr<QMimeData> MimeDataFromText(
 		TextWithTags &&text,
-		const QString &expanded) {
+		const QString &expanded,
+		const QString &html) {
 	if (expanded.isEmpty()) {
 		return nullptr;
 	}
 
 	auto result = std::make_unique<QMimeData>();
 	result->setText(expanded);
+	if (!html.isEmpty()) {
+		result->setHtml(html);
+	}
 	if (!text.tags.isEmpty()) {
 		for (auto &tag : text.tags) {
 			tag.id = Ui::Integration::Instance().convertTagToMimeTag(tag.id);
@@ -1411,6 +1486,10 @@ QString RemoveEmoji(const QString &text) {
 		}
 	}
 	return result;
+}
+
+QString NameSortKey(const QString &text) {
+	return RemoveAccents(text).toLower();
 }
 
 QStringList PrepareSearchWords(
@@ -1989,6 +2068,34 @@ bool IsSeparateTag(QStringView tag) {
 		|| (tag == Ui::InputField::kTagPre);
 }
 
+QString FormattedDateMetaTag(const QString &data) {
+	return data.isEmpty()
+		? QString()
+		: kFormattedDateMetaTagPrefix
+			+ QString::fromLatin1(data.toUtf8().toHex());
+}
+
+bool IsFormattedDateMetaTag(QStringView tag) {
+	return tag.startsWith(kFormattedDateMetaTagPrefix);
+}
+
+QString FormattedDateMetaTagData(QStringView tag) {
+	return IsFormattedDateMetaTag(tag)
+		? DecodeHexTagPayload(
+			base::StringViewMid(tag, kFormattedDateMetaTagPrefix.size()))
+		: QString();
+}
+
+bool IsRichFormattingTag(QStringView tag) {
+	return (tag == Ui::InputField::kTagIvMarked)
+		|| (tag == Ui::InputField::kTagIvSubscript)
+		|| (tag == Ui::InputField::kTagIvSuperscript);
+}
+
+bool IsRichLinkTag(QStringView tag) {
+	return Ui::InputField::IsInstantViewAnchorLink(tag);
+}
+
 QString JoinTag(const QList<QStringView> &list) {
 	if (list.isEmpty()) {
 		return QString();
@@ -2071,13 +2178,17 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 		EntityType::StrikeOut,
 		EntityType::Spoiler,
 		EntityType::Code,
+		EntityType::Marked,
+		EntityType::Subscript,
+		EntityType::Superscript,
 	};
 	constexpr auto kInMaskTypesBlock = std::array{
 		EntityType::Pre,
 		EntityType::Blockquote,
 	};
 	struct State {
-		QString link;
+		ParsedLinkTag link;
+		QString formattedDateMetadata;
 		QString language;
 		uint32 mask : 31 = 0;
 		uint32 collapsed : 1 = 0;
@@ -2095,7 +2206,7 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 
 	auto offset = 0;
 	auto state = State();
-	auto notClosedEntities = std::vector<int>(); // Stack of indices.
+	auto notClosedEntities = std::vector<int>();
 	const auto closeOne = [&] {
 		Expects(!notClosedEntities.empty());
 
@@ -2111,7 +2222,7 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 			|| ranges::contains(kInMaskTypesBlock, type)) {
 			state.remove(entity.type());
 		} else {
-			state.link = QString();
+			state.link = ParsedLinkTag();
 		}
 		notClosedEntities.pop_back();
 	};
@@ -2134,11 +2245,17 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 		result.push_back({ type, offset, -1, data });
 	};
 
+	const auto stateChanged = [&](const State &nextState) {
+		return (nextState.link != state.link)
+			|| ((nextState.formattedDateMetadata != state.formattedDateMetadata)
+				&& ((state.link.type == EntityType::FormattedDate)
+					|| (nextState.link.type == EntityType::FormattedDate)));
+	};
 	const auto processState = [&](State nextState) {
-		const auto linkChanged = (nextState.link != state.link);
-		const auto closeLink = linkChanged && !state.link.isEmpty();
+		const auto linkChanged = stateChanged(nextState);
+		const auto closeLink = linkChanged && bool(state.link);
 		const auto closeCustomEmoji = closeLink
-			&& Ui::InputField::IsCustomEmojiLink(state.link);
+			&& (state.link.type == EntityType::CustomEmoji);
 		if (closeCustomEmoji) {
 			closeType(EntityType::CustomEmoji);
 		}
@@ -2147,12 +2264,13 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 				closeType(type);
 			}
 		}
-		if (closeLink && !closeCustomEmoji) {
-			if (IsMentionLink(state.link)) {
-				closeType(EntityType::MentionName);
-			} else {
-				closeType(EntityType::CustomUrl);
-			}
+		const auto closeCustomDate = closeLink
+			&& (state.link.type == EntityType::FormattedDate);
+		if (closeLink && !closeCustomEmoji && !closeCustomDate) {
+			closeType(state.link.type);
+		}
+		if (closeCustomDate) {
+			closeType(EntityType::FormattedDate);
 		}
 		for (const auto type : kInMaskTypesBlock) {
 			if (state.has(type) && !nextState.has(type)) {
@@ -2160,9 +2278,11 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 			}
 		}
 
-		const auto openLink = linkChanged && !nextState.link.isEmpty();
+		const auto openLink = linkChanged && bool(nextState.link);
 		const auto openCustomEmoji = openLink
-			&& Ui::InputField::IsCustomEmojiLink(nextState.link);
+			&& (nextState.link.type == EntityType::CustomEmoji);
+		const auto openCustomDate = openLink
+			&& (nextState.link.type == EntityType::FormattedDate);
 		for (const auto type : kInMaskTypesBlock | ranges::views::reverse) {
 			if (nextState.has(type) && !state.has(type)) {
 				openType(type, (type == EntityType::Pre)
@@ -2172,26 +2292,23 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 					: QString());
 			}
 		}
-		if (openLink && !openCustomEmoji) {
-			if (IsMentionLink(nextState.link)) {
-				const auto data = MentionEntityData(nextState.link);
-				if (!data.isEmpty()) {
-					openType(EntityType::MentionName, data);
-				}
-			} else {
-				openType(EntityType::CustomUrl, nextState.link);
-			}
+		if (openLink && !openCustomEmoji && !openCustomDate) {
+			openType(nextState.link.type, nextState.link.data);
 		}
 		for (const auto type : kInMaskTypesInline | ranges::views::reverse) {
 			if (nextState.has(type) && !state.has(type)) {
 				openType(type);
 			}
 		}
-		if (openCustomEmoji) {
-			const auto data = Ui::InputField::CustomEmojiEntityData(
-				nextState.link);
+		if (openCustomEmoji && !nextState.link.data.isEmpty()) {
+			openType(EntityType::CustomEmoji, nextState.link.data);
+		}
+		if (openCustomDate) {
+			const auto data = FormattedDateDataForTag(
+				nextState.link.data,
+				nextState.formattedDateMetadata);
 			if (!data.isEmpty()) {
-				openType(EntityType::CustomEmoji, data);
+				openType(EntityType::FormattedDate, data);
 			}
 		}
 		state = nextState;
@@ -2226,8 +2343,18 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 				result.collapsed = 1;
 			} else if (single == Tags::kTagSpoiler) {
 				result.set(EntityType::Spoiler);
-			} else {
-				result.link = single.toString();
+			} else if (IsRichFormattingTag(single)) {
+				if (single == Tags::kTagIvMarked) {
+					result.set(EntityType::Marked);
+				} else if (single == Tags::kTagIvSubscript) {
+					result.set(EntityType::Subscript);
+				} else if (single == Tags::kTagIvSuperscript) {
+					result.set(EntityType::Superscript);
+				}
+			} else if (IsFormattedDateMetaTag(single)) {
+				result.formattedDateMetadata = FormattedDateMetaTagData(single);
+			} else if (const auto link = ParseLinkTag(single); link) {
+				result.link = link;
 			}
 		}
 		return result;
@@ -2296,9 +2423,16 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 			}
 		} break;
 		case EntityType::CustomUrl: {
-			const auto url = entity.data();
+			auto url = entity.data();
+			if (const auto external = UrlClickHandler::ExternalUrlFromInternalUrl(
+					url);
+					!external.isEmpty()) {
+				url = external;
+			}
 			if (Ui::InputField::IsValidMarkdownLink(url)
 				&& !IsMentionLink(url)) {
+				push(url);
+			} else if (Ui::InputField::IsInstantViewAnchorLink(url)) {
 				push(url);
 			}
 		} break;
@@ -2323,7 +2457,8 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 		case EntityType::Code: push(Ui::InputField::kTagCode); break;
 		case EntityType::Pre: {
 			if (!entity.data().isEmpty()) {
-				static const auto Language = QRegularExpression("^[a-zA-Z0-9\\-\\+]+$");
+				static const auto Language = QRegularExpression(
+					"^[a-zA-Z0-9\\-\\+]+$");
 				if (Language.match(entity.data()).hasMatch()) {
 					push(Ui::InputField::kTagPre + entity.data());
 					break;
@@ -2337,6 +2472,29 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 				: Ui::InputField::kTagBlockquoteCollapsed);
 			break;
 		case EntityType::Spoiler: push(Ui::InputField::kTagSpoiler); break;
+		case EntityType::Subscript:
+			push(Ui::InputField::kTagIvSubscript);
+			break;
+		case EntityType::Superscript:
+			push(Ui::InputField::kTagIvSuperscript);
+			break;
+		case EntityType::Marked:
+			push(Ui::InputField::kTagIvMarked);
+			break;
+		case EntityType::FormattedDate: {
+			const auto [date, dateFlags] = DeserializeFormattedDateData(
+				entity.data());
+			if (date <= 0) {
+				break;
+			}
+			push(Ui::InputField::kCustomDateTagStart + QString::number(date));
+			if (dateFlags) {
+				const auto metadata = FormattedDateMetaTag(entity.data());
+				if (!metadata.isEmpty()) {
+					push(metadata);
+				}
+			}
+		} break;
 		}
 	}
 	if (!toRemove.empty()) {
@@ -2346,14 +2504,17 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 }
 
 std::unique_ptr<QMimeData> MimeDataFromText(const TextForMimeData &text) {
+	const auto html = TextUtilities::TextForMimeDataToHtml(text);
 	return MimeDataFromText(
 		{ text.rich.text, ConvertEntitiesToTextTags(text.rich.entities) },
-		text.expanded);
+		text.expanded,
+		html);
 }
 
 std::unique_ptr<QMimeData> MimeDataFromText(TextWithTags &&text) {
 	const auto expanded = ExpandCustomLinks(text);
-	return MimeDataFromText(std::move(text), expanded);
+	const auto html = TextUtilities::TextWithTagsToHtml(text);
+	return MimeDataFromText(std::move(text), expanded, html);
 }
 
 void SetClipboardText(
@@ -2381,8 +2542,10 @@ TextForMimeData TextForMimeData::WithExpandedLinks(
 				continue;
 			}
 			// This logic is duplicated in Ui::Text::String::toText.
-			const auto &data = entity.data();
-			if (!data.startsWith(qstr("internal:"))
+			const auto external = UrlClickHandler::ExternalUrlFromInternalUrl(
+				entity.data());
+			const auto data = external.isEmpty() ? entity.data() : external;
+			if (!data.startsWith(u"internal:"_q)
 				&& (data != UrlClickHandler::EncodeForOpening(
 					text.text.mid(entity.offset(), entity.length())))) {
 				const auto till = entity.offset() + entity.length();
@@ -2390,7 +2553,7 @@ TextForMimeData TextForMimeData::WithExpandedLinks(
 					result.expanded.append(text.text.data() + from, add);
 					from = till;
 				}
-				result.expanded.append(qstr(" (")).append(data).append(')');
+				result.expanded.append(u" ("_q).append(data).append(')');
 			}
 		}
 		const auto till = text.text.size();
@@ -2428,4 +2591,24 @@ int EntityInText::FirstMonospaceOffset(
 		std::greater<>(),
 		&EntityInText::offset);
 	return (i == monospace.end()) ? textLength : i->offset();
+}
+
+QString SerializeFormattedDateData(
+		int32 date,
+		FormattedDateFlags flags) {
+	return QString::number(date)
+		+ ':'
+		+ QString::number(flags.value());
+}
+
+std::pair<int32, FormattedDateFlags> DeserializeFormattedDateData(
+		const QString &data) {
+	const auto parts = data.split(':');
+	if (parts.size() != 2) {
+		return std::pair(int32(0), FormattedDateFlags());
+	}
+	const auto date = int32(parts[0].toInt());
+	const auto flags = FormattedDateFlags::from_raw(
+		uint8(parts[1].toUInt()));
+	return std::pair(date, flags);
 }

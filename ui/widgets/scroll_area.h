@@ -61,7 +61,7 @@ private:
 
 };
 
-class ScrollBar : public TWidget {
+class ScrollBar : public RpWidget {
 public:
 	struct ShadowVisibility {
 		ScrollShadow::Type type;
@@ -166,8 +166,10 @@ public:
 
 	void scrollTo(ScrollToRequest request);
 	void scrollToWidget(not_null<QWidget*> widget);
-	[[nodiscard]] int computeScrollTo(int toTop, int toBottom);
+	[[nodiscard]] int computeScrollToX(int toLeft, int toRight);
+	[[nodiscard]] int computeScrollToY(int toTop, int toBottom);
 
+	void scrollToX(int toLeft, int toRight = -1);
 	void scrollToY(int toTop, int toBottom = -1);
 	void disableScroll(bool dis);
 	void scrolled();
@@ -183,6 +185,8 @@ public:
 	[[nodiscard]] rpl::producer<> scrolls() const;
 	[[nodiscard]] rpl::producer<> innerResizes() const;
 	[[nodiscard]] rpl::producer<> geometryChanged() const;
+
+	[[nodiscard]] rpl::producer<bool> touchMaybePressing() const;
 
 protected:
 	bool eventHook(QEvent *e) override;
@@ -219,7 +223,7 @@ private:
 	object_ptr<ScrollShadow> _topShadow, _bottomShadow;
 	int _horizontalValue, _verticalValue;
 
-	bool _touchEnabled;
+	bool _touchEnabled = false;
 	base::Timer _touchTimer;
 	bool _touchScroll = false;
 	bool _touchPress = false;
@@ -229,6 +233,7 @@ private:
 	TouchScrollState _touchScrollState = TouchScrollState::Manual;
 	bool _touchPrevPosValid = false;
 	bool _touchWaitingAcceleration = false;
+	rpl::variable<bool> _touchMaybePressing;
 	QPoint _touchSpeed;
 	crl::time _touchSpeedTime = 0;
 	crl::time _touchAccelerationTime = 0;
@@ -247,5 +252,20 @@ private:
 	rpl::event_stream<> _geometryChanged;
 
 };
+
+template <typename Scroll>
+void SetStickyBottomScroll(
+		Scroll *scroll,
+		not_null<RpWidget*> inner) {
+	Expects(scroll != nullptr);
+	inner->heightValue(
+	) | rpl::combine_previous(
+	) | rpl::on_next([=](int previous, int height) {
+		if (scroll->scrollTop() + scroll->scrollHeight() >= previous) {
+			const auto visible = scroll->scrollHeight();
+			scroll->scrollToY(height - visible, height);
+		}
+	}, inner->lifetime());
+}
 
 } // namespace Ui

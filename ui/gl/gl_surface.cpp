@@ -6,6 +6,7 @@
 //
 #include "ui/gl/gl_surface.h"
 
+#include "ui/rhi/rhi_surface.h"
 #include "ui/rp_widget.h"
 #include "ui/painter.h"
 
@@ -75,7 +76,7 @@ void SurfaceOpenGL::initializeGL() {
 		context,
 		&QOpenGLContext::aboutToBeDestroyed,
 		[=] { callDeInit(); });
-	_renderer->init(this, *context->functions());
+	_renderer->init(*context->functions());
 }
 
 void SurfaceOpenGL::resizeEvent(QResizeEvent *e) {
@@ -126,10 +127,9 @@ void SurfaceOpenGL::callDeInit() {
 	makeCurrent();
 	const auto context = this->context();
 	_renderer->deinit(
-		this,
-		((isValid() && context && QOpenGLContext::currentContext() == context)
+		(isValid() && context && QOpenGLContext::currentContext() == context)
 			? context->functions()
-			: nullptr));
+			: nullptr);
 }
 
 SurfaceRaster::SurfaceRaster(
@@ -140,7 +140,8 @@ SurfaceRaster::SurfaceRaster(
 }
 
 void SurfaceRaster::paintEvent(QPaintEvent *e) {
-	_renderer->paintFallback(Painter(this), e->region(), Backend::Raster);
+	auto p = Painter(this);
+	_renderer->paintFallback(p, e->region(), Backend::Raster);
 }
 
 } // namespace
@@ -148,13 +149,18 @@ void SurfaceRaster::paintEvent(QPaintEvent *e) {
 void Renderer::paint(
 		not_null<QOpenGLWidget*> widget,
 		QOpenGLFunctions &f) {
-	paintFallback(Painter(widget.get()), widget->rect(), Backend::OpenGL);
+	auto p = Painter(widget.get());
+	paintFallback(p, widget->rect(), Backend::OpenGL);
 }
 
 std::unique_ptr<RpWidgetWrap> CreateSurface(
 		Fn<ChosenRenderer(Capabilities)> chooseRenderer) {
 	auto chosen = chooseRenderer(CheckCapabilities(nullptr));
 	switch (chosen.backend) {
+	case Backend::QRhi:
+		return CreateSurfaceRhi(
+			nullptr,
+			std::move(chosen.renderer));
 	case Backend::OpenGL:
 		return std::make_unique<SurfaceOpenGL>(
 			nullptr,
@@ -171,6 +177,10 @@ std::unique_ptr<RpWidgetWrap> CreateSurface(
 		QWidget *parent,
 		ChosenRenderer chosen) {
 	switch (chosen.backend) {
+	case Backend::QRhi:
+		return CreateSurfaceRhi(
+			parent,
+			std::move(chosen.renderer));
 	case Backend::OpenGL:
 		return std::make_unique<SurfaceOpenGL>(
 			parent,

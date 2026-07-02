@@ -36,6 +36,12 @@ PRIVATE
     fonts/fonts.qrc
     qt_conf/win.qrc
 
+    ui/accessible/ui_accessible_factory.cpp
+    ui/accessible/ui_accessible_factory.h
+    ui/accessible/ui_accessible_item.cpp
+    ui/accessible/ui_accessible_item.h
+    ui/accessible/ui_accessible_widget.cpp
+    ui/accessible/ui_accessible_widget.h
     ui/dpr/dpr_icon.cpp
     ui/dpr/dpr_icon.h
     ui/dpr/dpr_image.h
@@ -86,6 +92,13 @@ PRIVATE
     ui/gl/gl_surface.h
     ui/gl/gl_window.cpp
     ui/gl/gl_window.h
+    ui/rhi/rhi_image.cpp
+    ui/rhi/rhi_image.h
+    ui/rhi/rhi_renderer.h
+    ui/rhi/rhi_shader.cpp
+    ui/rhi/rhi_shader.h
+    ui/rhi/rhi_surface.cpp
+    ui/rhi/rhi_surface.h
     ui/image/image_prepare.cpp
     ui/image/image_prepare.h
     ui/layers/box_content.cpp
@@ -155,8 +168,12 @@ PRIVATE
     ui/style/style_core_types.h
     ui/style/style_palette_colorizer.cpp
     ui/style/style_palette_colorizer.h
+    ui/text/custom_emoji_helper.cpp
+    ui/text/custom_emoji_helper.h
     ui/text/custom_emoji_instance.cpp
     ui/text/custom_emoji_instance.h
+    ui/text/custom_emoji_text_badge.cpp
+    ui/text/custom_emoji_text_badge.h
     ui/text/text.cpp
     ui/text/text.h
     ui/text/text_bidi_algorithm.h
@@ -170,6 +187,8 @@ PRIVATE
     ui/text/text_entity.h
     ui/text/text_extended_data.cpp
     ui/text/text_extended_data.h
+    ui/text/text_html_tags.cpp
+    ui/text/text_html_tags.h
     ui/text/text_isolated_emoji.h
     ui/text/text_renderer.cpp
     ui/text/text_renderer.h
@@ -236,6 +255,8 @@ PRIVATE
     ui/widgets/menu/menu_toggle.h
     ui/widgets/elastic_scroll.cpp
     ui/widgets/elastic_scroll.h
+    ui/widgets/pill_tabs.cpp
+    ui/widgets/pill_tabs.h
     ui/widgets/popup_menu.cpp
     ui/widgets/popup_menu.h
     ui/widgets/rp_window.cpp
@@ -296,13 +317,15 @@ PRIVATE
     ui/ph.cpp
     ui/ph.h
     ui/qt_object_factory.h
-    ui/qt_weak_factory.h
     ui/rect.h
     ui/rect_part.h
     ui/round_rect.cpp
     ui/round_rect.h
     ui/rp_widget.cpp
     ui/rp_widget.h
+    ui/screen_reader_mode.cpp
+    ui/screen_reader_mode.h
+    ui/ui_rpl_filter.h
     ui/ui_utility.cpp
     ui/ui_utility.h
 
@@ -316,10 +339,6 @@ PRIVATE
 if (DESKTOP_APP_USE_PACKAGED_FONTS)
     target_compile_definitions(lib_ui PRIVATE LIB_UI_USE_PACKAGED_FONTS)
     remove_target_sources(lib_ui ${src_loc} fonts/fonts.qrc)
-endif()
-
-if (WIN32)
-    nuget_add_winrt(lib_ui)
 endif()
 
 target_include_directories(lib_ui
@@ -337,5 +356,9 @@ PRIVATE
     desktop-app::external_lz4
     desktop-app::external_xxhash
 )
+
+if (WIN32 AND QT_VERSION LESS 6)
+    target_link_libraries(lib_ui PRIVATE desktop-app::external_angle)
+endif()
 
 target_prepare_qrc(lib_ui)

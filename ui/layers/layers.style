@@ -24,6 +24,7 @@ ServiceCheck {
 Box {
 	buttonPadding: margins;
 	buttonHeight: pixels;
+	buttonWide: bool;
 	button: RoundButton;
 	margin: margins;
 	title: FlatLabel;
@@ -67,18 +68,7 @@ defaultBoxCheckbox: Checkbox(defaultCheckbox) {
 	style: boxTextStyle;
 }
 
-boxRoundShadow: Shadow {
-	left: icon {{ "round_shadow_box_left", windowShadowFg }};
-	topLeft: icon {{ "round_shadow_box_top_left", windowShadowFg }};
-	top: icon {{ "round_shadow_box_top", windowShadowFg }};
-	topRight: icon {{ "round_shadow_box_top_left-flip_horizontal", windowShadowFg }};
-	right: icon {{ "round_shadow_box_left-flip_horizontal", windowShadowFg }};
-	bottomRight: icon {{ "round_shadow_box_bottom_left-flip_horizontal", windowShadowFg }};
-	bottom: icon {{ "round_shadow_box_bottom", windowShadowFg }};
-	bottomLeft: icon {{ "round_shadow_box_bottom_left", windowShadowFg }};
-	extend: margins(10px, 10px, 10px, 10px);
-	fallback: windowShadowFgFallback;
-}
+boxRoundShadow: roundShadowRadius8px;
 
 boxTitleFont: font(16px semibold);
 boxTitle: FlatLabel(defaultFlatLabel) {
@@ -109,9 +99,11 @@ boxTitleClose: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(4px, 4px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
+}
+boxTitleMenu: IconButton(boxTitleClose) {
+	icon: icon {{ "title_menu_dots", boxTitleCloseFg }};
+	iconOver: icon {{ "title_menu_dots", boxTitleCloseFgOver }};
 }
 
 boxLinkButton: LinkButton(defaultLinkButton) {
@@ -146,23 +138,12 @@ boxLabel: FlatLabel(defaultFlatLabel) {
 	align: align(topleft);
 	style: boxLabelStyle;
 }
-boxDividerLabel: FlatLabel(boxLabel) {
-	minWidth: 245px;
-	align: align(topleft);
-	textFg: windowSubTextFg;
-	style: defaultTextStyle;
-}
-defaultBoxDividerLabelPadding: margins(22px, 8px, 22px, 16px);
 
 boxLoadingAnimation: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
 	color: windowSubTextFg;
 	thickness: 2px;
 }
 boxLoadingSize: 20px;
-
-boxDividerTop: icon {{ "box_divider_top", boxDividerFg }};
-boxDividerBottom: icon {{ "box_divider_bottom", boxDividerFg }};
-boxDividerHeight: 8px;
 
 defaultSubsectionTitle: FlatLabel(defaultFlatLabel) {
 	style: TextStyle(semiboldTextStyle) {
@@ -176,15 +157,14 @@ defaultSubsectionTitlePadding: margins(22px, 7px, 10px, 9px);
 separatePanelBorderCacheSize: 60px;
 separatePanelTitleHeight: 62px;
 separatePanelNoTitleHeight: 32px;
+separatePanelTitleBadgeSkip: 6px;
 separatePanelClose: IconButton(boxTitleClose) {
 	width: 60px;
 	height: 60px;
 
 	rippleAreaPosition: point(8px, 8px);
 	rippleAreaSize: 44px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 separatePanelMenu: IconButton(separatePanelClose) {
 	width: 44px;
@@ -206,6 +186,7 @@ separatePanelTitle: FlatLabel(defaultFlatLabel) {
 separatePanelTitleTop: 18px;
 separatePanelTitleLeft: 22px;
 separatePanelTitleSkip: 0px;
+separatePanelTitleBadgeTop: 4px;
 separatePanelSearch: IconButton(separatePanelClose) {
 	width: 44px;
 
@@ -219,6 +200,29 @@ separatePanelBack: IconButton(separatePanelClose) {
 	iconOver: icon {{ "box_button_back", boxTitleCloseFgOver }};
 }
 separatePanelDuration: 150;
+
+fullScreenPanelClose: IconButton {
+	width: 44px;
+	height: 44px;
+
+	icon: icon {{ "box_button_close", radialFg }};
+	iconOver: icon {{ "box_button_close", radialFg }};
+	iconPosition: point(-1px, -1px);
+
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 44px;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: shadowFg;
+	}
+}
+fullScreenPanelBack: IconButton(fullScreenPanelClose) {
+	icon: icon {{ "box_button_back", radialFg }};
+	iconOver: icon {{ "box_button_back", radialFg }};
+}
+fullScreenPanelMenu: IconButton(fullScreenPanelClose) {
+	icon: icon {{ "title_menu_dots", radialFg }};
+	iconOver: icon {{ "title_menu_dots", radialFg }};
+}
 
 webviewDialogButton: defaultBoxButton;
 webviewDialogDestructiveButton: attentionBoxButton;

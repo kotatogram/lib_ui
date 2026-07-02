@@ -7,6 +7,7 @@
 #include "ui/platform/mac/ui_utility_mac.h"
 
 #include "ui/integration.h"
+#include "base/platform/mac/base_utilities_mac.h"
 
 #include <QtGui/QPainter>
 #include <QtGui/QtEvents>
@@ -70,11 +71,23 @@ void ReInitOnTopPanel(not_null<QWidget*> panel) {
 
 void ShowOverAll(not_null<QWidget*> widget, bool canFocus) {
 	NSWindow *wnd = [reinterpret_cast<NSView*>(widget->winId()) window];
-	[wnd setLevel:NSPopUpMenuWindowLevel];
-	if (!canFocus) {
-		[wnd setStyleMask:NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskNonactivatingPanel];
-		[wnd setCollectionBehavior:NSWindowCollectionBehaviorMoveToActiveSpace|NSWindowCollectionBehaviorStationary|NSWindowCollectionBehaviorFullScreenAuxiliary|NSWindowCollectionBehaviorIgnoresCycle];
+
+	auto behavior = [wnd collectionBehavior];
+
+	if (widget->windowFlags() & Qt::Popup) {
+		behavior |= NSWindowCollectionBehaviorMoveToActiveSpace;
 	}
+
+	if (!canFocus) {
+		[wnd setStyleMask:NSWindowStyleMaskUtilityWindow
+			| NSWindowStyleMaskNonactivatingPanel];
+		behavior |= NSWindowCollectionBehaviorMoveToActiveSpace
+			| NSWindowCollectionBehaviorStationary
+			| NSWindowCollectionBehaviorFullScreenAuxiliary
+			| NSWindowCollectionBehaviorIgnoresCycle;
+	}
+
+	[wnd setCollectionBehavior:behavior];
 }
 
 void AcceptAllMouseInput(not_null<QWidget*> widget) {
@@ -162,6 +175,44 @@ std::optional<bool> IsOverlapped(
 		}
 	}
 	return false;
+}
+
+SystemTextReplaceResult FindSystemTextReplace(const QString &text) {
+	if (text.isEmpty()) {
+		return {};
+	}
+	NSSpellChecker *checker = nil;
+	@try {
+		checker = [NSSpellChecker sharedSpellChecker];
+	} @catch (id exception) {
+		return {};
+	}
+	if (!checker) {
+		return {};
+	}
+	const auto nsText = ::Platform::Q2NSString(text);
+	const auto results = [checker
+		checkString:nsText
+		range:NSMakeRange(0, nsText.length)
+		types:NSTextCheckingTypeReplacement
+		options:nil
+		inSpellDocumentWithTag:0
+		orthography:nil
+		wordCount:nil];
+	for (NSTextCheckingResult *result in results) {
+		if (result.resultType != NSTextCheckingTypeReplacement) {
+			continue;
+		}
+		const auto matchEnd = result.range.location + result.range.length;
+		if (matchEnd == NSUInteger(text.length())) {
+			return {
+				.length = int(result.range.length),
+				.replacement = ::Platform::NS2QString(
+					result.replacementString),
+			};
+		}
+	}
+	return {};
 }
 
 } // namespace Platform

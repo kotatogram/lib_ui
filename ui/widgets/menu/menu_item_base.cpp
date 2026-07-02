@@ -6,12 +6,15 @@
 //
 #include "ui/widgets/menu/menu_item_base.h"
 
+#include "ui/widgets/menu/menu.h"
+
 namespace Ui::Menu {
 
 ItemBase::ItemBase(
-	not_null<RpWidget*> parent,
+	not_null<Menu*> parent,
 	const style::Menu &st)
-: RippleButton(parent, st.ripple) {
+: RippleButton(parent, st.ripple)
+, _menu(parent) {
 }
 
 void ItemBase::setSelected(
@@ -25,6 +28,11 @@ void ItemBase::setSelected(
 		_lastTriggeredSource = source;
 		_selected = selected;
 		update();
+		if (selected && focusPolicy() != Qt::NoFocus) {
+			setFocus();
+			QAccessibleEvent event(this, QAccessible::Focus);
+			QAccessible::updateAccessibility(&event);
+		}
 	}
 }
 
@@ -35,7 +43,14 @@ bool ItemBase::isSelected() const {
 rpl::producer<CallbackData> ItemBase::selects() const {
 	return _selected.changes(
 	) | rpl::map([=](bool selected) -> CallbackData {
-		return { action(), y(), _lastTriggeredSource, _index, selected };
+		return {
+			action(),
+			y(),
+			_lastTriggeredSource,
+			_index,
+			selected,
+			_preventClose,
+		};
 	});
 }
 
@@ -65,7 +80,14 @@ rpl::producer<CallbackData> ItemBase::clicks() const {
 	) | rpl::filter([=] {
 		return isEnabled() && !AbstractButton::isDisabled();
 	}) | rpl::map([=]() -> CallbackData {
-		return { action(), y(), _lastTriggeredSource, _index, true };
+		return {
+			action(),
+			y(),
+			_lastTriggeredSource,
+			_index,
+			true,
+			_preventClose,
+		};
 	});
 }
 
@@ -77,16 +99,24 @@ int ItemBase::minWidth() const {
 	return _minWidth.current();
 }
 
-void ItemBase::initResizeHook(rpl::producer<QSize> &&size) {
-	std::move(
-		size
-	) | rpl::start_with_next([=](QSize s) {
-		resize(s.width(), contentHeight());
+void ItemBase::fitToMenuWidth() {
+	_menu->widthValue() | rpl::on_next([=](int w) {
+		if (w > 0) {
+			resize(w, contentHeight());
+		}
 	}, lifetime());
 }
 
 void ItemBase::setMinWidth(int w) {
 	_minWidth = w;
+}
+
+void ItemBase::setPreventClose(bool prevent) {
+	_preventClose = prevent;
+}
+
+bool ItemBase::preventClose() const {
+	return _preventClose;
 }
 
 void ItemBase::finishAnimating() {
@@ -99,7 +129,7 @@ void ItemBase::enableMouseSelecting() {
 
 void ItemBase::enableMouseSelecting(not_null<RpWidget*> widget) {
 	widget->events(
-	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+	) | rpl::on_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (((type == QEvent::Leave)
 			|| (type == QEvent::Enter)
@@ -114,6 +144,72 @@ void ItemBase::enableMouseSelecting(not_null<RpWidget*> widget) {
 			}
 		}
 	}, lifetime());
+}
+
+void ItemBase::setActionTriggered(Fn<void()> callback) {
+	if (callback) {
+		_connection = QObject::connect(
+			action(),
+			&QAction::triggered,
+			std::move(callback));
+	} else {
+		_connection.reset();
+	}
+}
+
+void ItemBase::keyPressEvent(QKeyEvent *e) {
+	e->ignore();
+}
+
+void ItemBase::keyReleaseEvent(QKeyEvent *e) {
+	e->ignore();
+}
+
+void ItemBase::mousePressEvent(QMouseEvent *e) {
+	if (!_menu->hasMouseMoved(e->globalPos())) {
+		return;
+	}
+	if (e->button() == Qt::LeftButton) {
+		_mousePressed = true;
+	}
+	RippleButton::mousePressEvent(e);
+}
+
+void ItemBase::mouseMoveEvent(QMouseEvent *e) {
+	_menu->mouseMoved();
+	if (!_menu->hasMouseMoved(e->globalPos())) {
+		return;
+	}
+	if (_mousePressed && _menu && !rect().contains(e->pos())) {
+		_menu->handlePressedOutside(e->globalPos());
+	}
+	RippleButton::mouseMoveEvent(e);
+}
+
+void ItemBase::mouseReleaseEvent(QMouseEvent *e) {
+	if (!_menu->hasMouseMoved(e->globalPos())) {
+		return;
+	}
+	const auto wasPressed = base::take(_mousePressed);
+#ifdef Q_OS_UNIX
+	if (isEnabled() && e->button() == Qt::RightButton) {
+		setClicked(TriggeredSource::Mouse);
+		return;
+	}
+#endif // Q_OS_UNIX
+	const auto isInRect = rect().contains(e->pos());
+	if (isInRect
+		&& isEnabled()
+		&& e->button() == Qt::LeftButton
+		&& !wasPressed) {
+		//
+		setClicked(TriggeredSource::Mouse);
+		return;
+	}
+	if (wasPressed && _menu && !isInRect) {
+		_menu->handleMouseRelease(e->globalPos());
+	}
+	RippleButton::mouseReleaseEvent(e);
 }
 
 } // namespace Ui::Menu

@@ -26,6 +26,7 @@ class RpWindow;
 namespace Platform {
 
 class TitleControls;
+class TitleControlsLayout;
 
 enum class HitTestResult {
 	None = 0,
@@ -61,6 +62,22 @@ enum class TitleControl {
 	Minimize,
 	Maximize,
 	Close,
+};
+
+struct TitleLayout {
+	[[nodiscard]] inline bool onLeft() const {
+		if (ranges::contains(left, TitleControl::Close)) {
+			return true;
+		} else if (ranges::contains(right, TitleControl::Close)) {
+			return false;
+		} else if (left.size() > right.size()) {
+			return true;
+		}
+		return false;
+	}
+
+	std::vector<TitleControl> left;
+	std::vector<TitleControl> right;
 };
 
 class AbstractTitleButtons {
@@ -112,6 +129,7 @@ public:
 
 	void setStyle(const style::WindowTitle &st);
 	[[nodiscard]] not_null<const style::WindowTitle*> st() const;
+	[[nodiscard]] TitleControlsLayout &layout() const;
 	[[nodiscard]] QRect geometry() const;
 	void setResizeEnabled(bool enabled);
 	void raise();
@@ -122,10 +140,7 @@ public:
 	void buttonDown(HitTestResult testResult);
 
 	using Control = TitleControl;
-	struct Layout {
-		std::vector<Control> left;
-		std::vector<Control> right;
-	};
+	using Layout = TitleLayout;
 
 private:
 	[[nodiscard]] not_null<RpWidget*> parent() const;
@@ -138,6 +153,7 @@ private:
 	void handleWindowStateChanged(Qt::WindowStates state = Qt::WindowNoState);
 
 	not_null<const style::WindowTitle*> _st;
+	const std::shared_ptr<TitleControlsLayout> _layout;
 	const std::unique_ptr<AbstractTitleButtons> _buttons;
 
 	object_ptr<AbstractButton> _minimize;
@@ -150,35 +166,40 @@ private:
 
 };
 
-namespace internal {
+class TitleControlsLayout {
+public:
+	virtual ~TitleControlsLayout() = default;
 
-// Actual requestor, cached by the public interface
-[[nodiscard]] TitleControls::Layout TitleControlsLayout();
-void NotifyTitleControlsLayoutChanged(
-	const std::optional<TitleControls::Layout> &layout = std::nullopt);
+	[[nodiscard]] static std::shared_ptr<TitleControlsLayout> Instance();
 
-} // namespace internal
-
-[[nodiscard]] TitleControls::Layout TitleControlsLayout();
-[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutValue();
-[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutChanged();
-[[nodiscard]] inline bool TitleControlsOnLeft(
-		const TitleControls::Layout &layout = TitleControlsLayout()) {
-	if (ranges::contains(layout.left, TitleControl::Close)) {
-		return true;
-	} else if (ranges::contains(layout.right, TitleControl::Close)) {
-		return false;
-	} else if (layout.left.size() > layout.right.size()) {
-		return true;
+	[[nodiscard]] TitleLayout current() const {
+		return _variable.current();
 	}
-	return false;
-}
+
+	[[nodiscard]] rpl::producer<TitleLayout> value() const {
+		return _variable.value();
+	}
+
+	[[nodiscard]] rpl::producer<TitleLayout> changes() const {
+		return _variable.changes();
+	}
+
+protected:
+	TitleControlsLayout(TitleLayout layout) : _variable(layout) {}
+
+	rpl::variable<TitleLayout> _variable;
+
+private:
+	[[nodiscard]] static std::shared_ptr<TitleControlsLayout> Create();
+
+};
 
 class DefaultTitleWidget : public RpWidget {
 public:
 	explicit DefaultTitleWidget(not_null<RpWidget*> parent);
 
 	[[nodiscard]] not_null<const style::WindowTitle*> st() const;
+	[[nodiscard]] TitleControlsLayout &layout() const;
 	[[nodiscard]] QRect controlsGeometry() const;
 	void setText(const QString &text);
 	void setStyle(const style::WindowTitle &st);

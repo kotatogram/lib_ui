@@ -44,19 +44,15 @@ HRESULT(__stdcall *GetScaleFactorForMonitor)(
 
 } // namespace
 
-namespace internal {
-
-TitleControls::Layout TitleControlsLayout() {
-	return TitleControls::Layout{
+std::shared_ptr<TitleControlsLayout> TitleControlsLayout::Create() {
+	return std::shared_ptr<TitleControlsLayout>(new TitleControlsLayout({
 		.right = {
 			TitleControls::Control::Minimize,
 			TitleControls::Control::Maximize,
 			TitleControls::Control::Close,
 		}
-	};
+	}));
 }
-
-} // namespace internal
 
 struct TitleWidget::PaddingHelper {
 	explicit PaddingHelper(QWidget *parent) : controlsParent(parent) {
@@ -78,7 +74,7 @@ TitleWidget::TitleWidget(not_null<RpWidget*> parent)
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
 	parent->widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		refreshGeometryWithWidth(width);
 	}, lifetime());
 }
@@ -87,7 +83,7 @@ void TitleWidget::initInWindow(not_null<RpWindow*> window) {
 	window->hitTestRequests(
 	) | rpl::filter([=](not_null<HitTestRequest*> request) {
 		return !isHidden() && geometry().contains(request->point);
-	}) | rpl::start_with_next([=](not_null<HitTestRequest*> request) {
+	}) | rpl::on_next([=](not_null<HitTestRequest*> request) {
 		request->result = hitTest(request->point);
 	}, lifetime());
 

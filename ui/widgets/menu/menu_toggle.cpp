@@ -11,7 +11,7 @@
 namespace Ui::Menu {
 
 Toggle::Toggle(
-	not_null<RpWidget*> parent,
+	not_null<Menu*> parent,
 	const style::Menu &st,
 	const QString &text,
 	Fn<void()> &&callback,
@@ -45,7 +45,7 @@ Toggle::Toggle(
 	connect(action(), &QAction::changed, [=] { processAction(); });
 
 	selects(
-	) | rpl::start_with_next([=](const CallbackData &data) {
+	) | rpl::on_next([=](const CallbackData &data) {
 		if (!_toggle) {
 			return;
 		}

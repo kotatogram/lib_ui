@@ -22,8 +22,6 @@ extern const style::ScrollArea &defaultScrollArea;
 
 namespace Ui {
 
-inline constexpr auto kPixelToAngleDelta = 2;
-
 struct ScrollState {
 	int visibleFrom = 0;
 	int visibleTill = 0;
@@ -119,6 +117,8 @@ public:
 	bool viewportEvent(QEvent *e);
 	void keyPressEvent(QKeyEvent *e) override;
 
+	QWidget *viewport() const; // Dummy.
+
 	int scrollWidth() const;
 	int scrollHeight() const;
 	int scrollLeftMax() const;
@@ -137,14 +137,29 @@ public:
 		return object_ptr<Widget>::fromRaw(
 			static_cast<Widget*>(doTakeWidget().release()));
 	}
+	[[nodiscard]] QWidget *widget() const;
 
 	void updateBars();
 
 	auto scrollTopValue() const {
-		return _scrollTopUpdated.events_starting_with(scrollTop());
+		return _vertical
+			? _scrollValueUpdated.events_starting_with(scrollTop())
+			: (rpl::single(0) | rpl::type_erased);
 	}
 	auto scrollTopChanges() const {
-		return _scrollTopUpdated.events();
+		return _vertical
+			? _scrollValueUpdated.events()
+			: (rpl::never<int>() | rpl::type_erased);
+	}
+	auto scrollLeftValue() const {
+		return _vertical
+			? (rpl::single(0) | rpl::type_erased)
+			: _scrollValueUpdated.events_starting_with(scrollLeft());
+	}
+	auto scrollLeftChanges() const {
+		return _vertical
+			? (rpl::never<int>() | rpl::type_erased)
+			: _scrollValueUpdated.events();
 	}
 
 	void scrollTo(ScrollToRequest request);
@@ -181,6 +196,10 @@ public:
 	using Movement = ElasticScrollMovement;
 	[[nodiscard]] Movement movement() const;
 	[[nodiscard]] rpl::producer<Movement> movementValue() const;
+
+	[[nodiscard]] rpl::producer<bool> touchMaybePressing() const;
+
+	void setBarTopInset(int inset);
 
 private:
 	bool eventHook(QEvent *e) override;
@@ -228,6 +247,7 @@ private:
 
 	const style::ScrollArea &_st;
 	std::unique_ptr<ElasticScrollBar> _bar;
+	int _barTopInset = 0;
 	ScrollState _state;
 
 	base::Timer _touchTimer;
@@ -240,6 +260,7 @@ private:
 	crl::time _touchAccelerationTime = 0;
 	crl::time _touchTime = 0;
 	crl::time _lastScroll = 0;
+	rpl::variable<bool> _touchMaybePressing;
 	TouchScrollState _touchScrollState = TouchScrollState::Manual;
 	int _overscrollAccumulated = 0;
 	int _ignoreMomentumFromOverscroll = 0;
@@ -269,7 +290,7 @@ private:
 
 	object_ptr<QWidget> _widget = { nullptr };
 
-	rpl::event_stream<int> _scrollTopUpdated;
+	rpl::event_stream<int> _scrollValueUpdated;
 	rpl::event_stream<> _scrolls;
 	rpl::event_stream<> _innerResizes;
 	rpl::event_stream<> _geometryChanged;
@@ -278,7 +299,5 @@ private:
 
 [[nodiscard]] int OverscrollFromAccumulated(int accumulated);
 [[nodiscard]] int OverscrollToAccumulated(int overscroll);
-[[nodiscard]] QPointF ScrollDeltaF(not_null<QWheelEvent*> e, bool touch = false);
-[[nodiscard]] QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch = false);
 
 } // namespace Ui

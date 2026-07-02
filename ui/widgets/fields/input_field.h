@@ -23,7 +23,6 @@
 class QMenu;
 class QShortcut;
 class QTextEdit;
-class QTouchEvent;
 class QContextMenuEvent;
 class Painter;
 
@@ -45,6 +44,7 @@ const auto kBlockquoteSequence = QKeySequence("ctrl+shift+.");
 const auto kMonospaceSequence = QKeySequence("ctrl+shift+m");
 const auto kEditLinkSequence = QKeySequence("ctrl+k");
 const auto kSpoilerSequence = QKeySequence("ctrl+shift+p");
+const auto kEditDateSequence = QKeySequence("ctrl+shift+d");
 
 class PopupMenu;
 class InputField;
@@ -78,6 +78,11 @@ enum class InputSubmitSettings {
 	CtrlEnter,
 	Both,
 	None,
+};
+
+enum class MarkdownSet {
+	All,
+	Notes,
 };
 
 class CustomFieldObject;
@@ -129,7 +134,6 @@ public:
 		MultiLine,
 	};
 	using TagList = TextWithTags::Tags;
-	using CustomEmojiFactory = Text::CustomEmojiFactory;
 
 	struct MarkdownTag {
 		// With each emoji being QChar::ObjectReplacementCharacter.
@@ -152,7 +156,12 @@ public:
 	static const QString kTagSpoiler;
 	static const QString kTagBlockquote;
 	static const QString kTagBlockquoteCollapsed;
+	static const QString kTagIvMarked;
+	static const QString kTagIvSubscript;
+	static const QString kTagIvSuperscript;
+	static const QString kTagIvMath;
 	static const QString kCustomEmojiTagStart;
+	static const QString kCustomDateTagStart;
 	static const int kCollapsedQuoteFormat; // QTextFormat::ObjectTypes
 	static const int kCustomEmojiFormat; // QTextFormat::ObjectTypes
 	static const int kCustomEmojiId; // QTextFormat::Property
@@ -177,6 +186,13 @@ public:
 		rpl::producer<QString> placeholder = nullptr,
 		const TextWithTags &value = TextWithTags());
 
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::EditableText;
+	}
+	QString accessibilityName() override {
+		return _placeholderFull.current();
+	}
+
 	[[nodiscard]] const style::InputField &st() const {
 		return _st;
 	}
@@ -188,6 +204,7 @@ public:
 	void setMaxLength(int maxLength);
 	void setMinHeight(int minHeight);
 	void setMaxHeight(int maxHeight);
+	void setMode(Mode mode);
 
 	[[nodiscard]] const TextWithTags &getTextWithTags() const {
 		return _lastTextWithTags;
@@ -216,10 +233,9 @@ public:
 	// (and then to clipboard or to drag-n-drop object), here is a strategy for that.
 	void setTagMimeProcessor(Fn<QString(QStringView)> processor);
 	void setCustomTextContext(
-		Fn<std::any(Fn<void()> repaint)> context,
+		Text::MarkedContext context,
 		Fn<bool()> pausedEmoji = nullptr,
-		Fn<bool()> pausedSpoiler = nullptr,
-		CustomEmojiFactory factory = nullptr);
+		Fn<bool()> pausedSpoiler = nullptr);
 
 	struct EditLinkSelection {
 		int from = 0;
@@ -232,7 +248,7 @@ public:
 	void setEditLinkCallback(
 		Fn<bool(
 			EditLinkSelection selection,
-			QString text,
+			TextWithTags text,
 			QString link,
 			EditLinkAction action)> callback);
 	void setEditLanguageCallback(
@@ -241,7 +257,10 @@ public:
 	struct ExtendedContextMenu {
 		QMenu *menu = nullptr;
 		std::shared_ptr<QContextMenuEvent> event;
+		Fn<void(not_null<PopupMenu*>)> setupPopupMenu;
 	};
+
+	void setPlaceholderColorOverride(const style::color &color);
 
 	void setDocumentMargin(float64 margin);
 	void setAdditionalMargin(int margin);
@@ -249,9 +268,15 @@ public:
 
 	void setInstantReplaces(const InstantReplaces &replaces);
 	void setInstantReplaces(rpl::producer<InstantReplaces> producer);
-	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
+	void setInstantReplacesEnabled(
+		rpl::producer<bool> enabled,
+		rpl::producer<bool> systemTextReplacesEnabled = {});
 	void setMarkdownReplacesEnabled(bool enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<MarkdownEnabledState> enabled);
+	void setInstantViewEditorTagsEnabled(bool enabled);
+	[[nodiscard]] bool instantViewEditorTagsEnabled() const {
+		return _instantViewEditorTagsEnabled;
+	}
 	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
 	void commitInstantReplacement(
 		int from,
@@ -260,12 +285,15 @@ public:
 		const QString &customEmojiData);
 	void commitMarkdownLinkEdit(
 		EditLinkSelection selection,
-		const QString &text,
+		const TextWithTags &textWithTags,
 		const QString &link);
 	[[nodiscard]] static bool IsValidMarkdownLink(QStringView link);
 	[[nodiscard]] static bool IsCustomEmojiLink(QStringView link);
 	[[nodiscard]] static QString CustomEmojiLink(QStringView entityData);
 	[[nodiscard]] static QString CustomEmojiEntityData(QStringView link);
+	[[nodiscard]] static bool IsCustomDateLink(QStringView link);
+	[[nodiscard]] static bool IsInstantViewEditorTag(QStringView tag);
+	[[nodiscard]] static bool IsInstantViewAnchorLink(QStringView link);
 
 	[[nodiscard]] const QString &getLastText() const {
 		return _lastTextWithTags.text;
@@ -275,6 +303,7 @@ public:
 		int afterSymbols = 0);
 	void setPlaceholderHidden(bool forcePlaceholderHidden);
 	void setDisplayFocused(bool focused);
+	[[nodiscard]] QMargins fullTextMargins() const;
 	void finishAnimating();
 	void setFocusFast() {
 		setDisplayFocused(true);
@@ -289,10 +318,14 @@ public:
 
 	bool isUndoAvailable() const;
 	bool isRedoAvailable() const;
+	void undo();
+	void redo();
 
 	[[nodiscard]] MarkdownEnabledState markdownEnabledState() const {
 		return _markdownEnabledState;
 	}
+
+	void setMarkdownSet(MarkdownSet set);
 
 	using SubmitSettings = InputSubmitSettings;
 	void setSubmitSettings(SubmitSettings settings);
@@ -300,7 +333,6 @@ public:
 		SubmitSettings settings,
 		Qt::KeyboardModifiers modifiers);
 	void customUpDown(bool isCustom);
-	void customTab(bool isCustom);
 	int borderAnimationStart() const;
 
 	not_null<QTextDocument*> document();
@@ -352,7 +384,7 @@ public:
 
 	[[nodiscard]] rpl::producer<> heightChanges() const;
 	[[nodiscard]] rpl::producer<bool> focusedChanges() const;
-	[[nodiscard]] rpl::producer<> tabbed() const;
+	[[nodiscard]] rpl::producer<not_null<bool*>> tabbed() const;
 	[[nodiscard]] rpl::producer<> cancelled() const;
 	[[nodiscard]] rpl::producer<> changes() const;
 	[[nodiscard]] rpl::producer<Qt::KeyboardModifiers> submits() const;
@@ -380,6 +412,7 @@ private:
 	enum class MarkdownActionType {
 		ToggleTag,
 		EditLink,
+		EditDate,
 	};
 	struct MarkdownAction {
 		QKeySequence sequence;
@@ -390,13 +423,15 @@ private:
 	void handleContentsChanged();
 	void updateRootFrameFormat();
 	bool viewportEventInner(QEvent *e);
-	void handleTouchEvent(QTouchEvent *e);
 
 	void updatePalette();
 	void refreshPlaceholder(const QString &text);
 	int placeholderSkipWidth() const;
+	[[nodiscard]] QMargins placeholderPaintMargins() const;
+	[[nodiscard]] float64 nonScaledPlaceholderBaseline() const;
 
 	[[nodiscard]] static std::vector<MarkdownAction> MarkdownActions();
+	[[nodiscard]] static std::vector<MarkdownAction> MarkdownActionsNotes();
 	void setupMarkdownShortcuts();
 	bool executeMarkdownAction(MarkdownAction action);
 
@@ -408,7 +443,10 @@ private:
 	void focusOutEventInner(QFocusEvent *e);
 	void setFocused(bool focused);
 	void keyPressEventInner(QKeyEvent *e);
-	void contextMenuEventInner(QContextMenuEvent *e, QMenu *m = nullptr);
+	void contextMenuEventInner(
+		QContextMenuEvent *e,
+		QMenu *m = nullptr,
+		Fn<void(not_null<PopupMenu*>)> setupPopupMenu = nullptr);
 	void dropEventInner(QDropEvent *e);
 	void inputMethodEventInner(QInputMethodEvent *e);
 	void paintEventInner(QPaintEvent *e);
@@ -452,6 +490,7 @@ private:
 	void processFormatting(int changedPosition, int changedEnd);
 
 	void chopByMaxLength(int insertPosition, int insertLength);
+	void performUndoRedo(bool redo);
 
 	bool processMarkdownReplaces(const QString &appended);
 	//bool processMarkdownReplace(const QString &tag);
@@ -466,6 +505,11 @@ private:
 	const InstantReplaces &instantReplaces() const;
 	void processInstantReplaces(const QString &appended);
 	void applyInstantReplace(const QString &what, const QString &with);
+	void processSystemTextReplaces(const QString &appended);
+	void applySystemTextReplace(
+		uint64 id,
+		int matchLength,
+		const QString &replacement);
 
 	struct EditLinkData {
 		int from = 0;
@@ -474,7 +518,11 @@ private:
 	};
 	EditLinkData selectionEditLinkData(EditLinkSelection selection) const;
 	EditLinkSelection editLinkSelection(QContextMenuEvent *e) const;
+	TextWithTags prepareTextStrippingLinks(
+		EditLinkSelection selection,
+		EditLinkData *outData);
 	void editMarkdownLink(EditLinkSelection selection);
+	void editMarkdownDate(EditLinkSelection selection);
 
 	void commitInstantReplacement(
 		int from,
@@ -529,10 +577,8 @@ private:
 		TextRange range);
 	void trippleEnterExitBlock(QTextCursor &cursor);
 
-	void touchUpdate(QPoint globalPosition);
-	void touchFinish();
-
 	const style::InputField &_st;
+	std::optional<style::color> _placeholderFgOverride;
 	Fn<not_null<Ui::Text::QuotePaintCache*>()> _preCache;
 	Fn<not_null<Ui::Text::QuotePaintCache*>()> _blockquoteCache;
 
@@ -545,7 +591,7 @@ private:
 
 	Fn<bool(
 		EditLinkSelection selection,
-		QString text,
+		TextWithTags text,
 		QString link,
 		EditLinkAction action)> _editLinkCallback;
 	Fn<void(QString now, Fn<void(QString)> save)> _editLanguageCallback;
@@ -589,13 +635,15 @@ private:
 
 	SubmitSettings _submitSettings = SubmitSettings::Enter;
 	MarkdownEnabledState _markdownEnabledState;
+	MarkdownSet _markdownSet = MarkdownSet::All;
+	bool _instantViewEditorTagsEnabled = false;
 	bool _undoAvailable = false;
 	bool _redoAvailable = false;
+	bool _performingUndoRedo = false;
 	bool _insertedTagsDelayClear = false;
 	bool _inHeightCheck = false;
 
 	bool _customUpDown = false;
-	bool _customTab = false;
 
 	rpl::variable<QString> _placeholderFull;
 	QString _placeholder;
@@ -615,13 +663,6 @@ private:
 	bool _focused = false;
 	bool _error = false;
 
-	base::Timer _touchTimer;
-	bool _touchPress = false;
-	bool _touchRightButton = false;
-	bool _touchMove = false;
-	bool _mousePressedInTouch = false;
-	QPoint _touchStart;
-
 	bool _correcting = false;
 	MimeDataHook _mimeDataHook;
 	rpl::event_stream<bool> _menuShownChanges;
@@ -636,6 +677,18 @@ private:
 	InstantReplaces _mutableInstantReplaces;
 	bool _instantReplacesEnabled = true;
 
+	struct SystemTextReplaces {
+		struct PendingCheck {
+			uint64 id = 0;
+			QTextCursor endAnchor;
+			QString textSent;
+		};
+		std::vector<PendingCheck> pending;
+		uint64 nextId = 0;
+	};
+	std::unique_ptr<SystemTextReplaces> _systemTextReplaces;
+	bool _systemTextReplacesEnabled = true;
+
 	rpl::event_stream<DocumentChangeInfo> _documentContentsChanges;
 	rpl::event_stream<MarkdownTag> _markdownTagApplies;
 
@@ -643,7 +696,7 @@ private:
 
 	rpl::event_stream<bool> _focusedChanges;
 	rpl::event_stream<> _heightChanges;
-	rpl::event_stream<> _tabbed;
+	rpl::event_stream<not_null<bool*>> _tabbed;
 	rpl::event_stream<> _cancelled;
 	rpl::event_stream<> _changes;
 	rpl::event_stream<Qt::KeyboardModifiers> _submits;
@@ -654,11 +707,20 @@ void PrepareFormattingOptimization(not_null<QTextDocument*> document);
 
 [[nodiscard]] int ComputeRealUnicodeCharactersCount(const QString &text);
 [[nodiscard]] int ComputeFieldCharacterCount(not_null<InputField*> field);
+[[nodiscard]] bool ShouldSubmit(
+	QKeyEvent *event,
+	InputSubmitSettings settings);
 
+struct LengthLimitLabelOptions {
+	RpWidget *customParent = nullptr;
+	std::optional<int> customThreshold = std::nullopt;
+	Fn<QPoint(QSize parent, QSize label)> customUpdatePosition;
+	Fn<int()> customCharactersCount;
+	int limitLabelTop = 0;
+};
 void AddLengthLimitLabel(
 	not_null<InputField*> field,
 	int limit,
-	std::optional<uint> customThreshold = std::nullopt,
-	int limitLabelTop = 0);
+	LengthLimitLabelOptions options = {});
 
 } // namespace Ui

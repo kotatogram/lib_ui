@@ -9,9 +9,9 @@
 #include "ui/platform/mac/ui_window_title_mac.h"
 #include "ui/widgets/rp_window.h"
 #include "ui/qt_object_factory.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/ui_utility.h"
 #include "base/qt/qt_common_adapters.h"
+#include "base/qt_signal_producer.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/palette.h"
 
@@ -22,46 +22,49 @@
 #include <QOpenGLWidget>
 #include <Cocoa/Cocoa.h>
 
+using FullScreenEvent = Ui::Platform::FullScreenEvent;
+
 @interface WindowObserver : NSObject {
 }
 
-- (id) initWithToggle:(Fn<void(bool)>)toggleCustomTitleVisibility enforce:(Fn<void()>)enforceCorrectStyle;
+- (id) initWithHandler:(Fn<void(FullScreenEvent)>)handler;
 - (void) windowWillEnterFullScreen:(NSNotification *)aNotification;
 - (void) windowWillExitFullScreen:(NSNotification *)aNotification;
+- (void) windowDidEnterFullScreen:(NSNotification *)aNotification;
 - (void) windowDidExitFullScreen:(NSNotification *)aNotification;
 
 @end // @interface WindowObserver
 
 @implementation WindowObserver {
-	Fn<void(bool)> _toggleCustomTitleVisibility;
-	Fn<void()> _enforceCorrectStyle;
+	Fn<void(FullScreenEvent)> _handler;
 }
 
-- (id) initWithToggle:(Fn<void(bool)>)toggleCustomTitleVisibility enforce:(Fn<void()>)enforceCorrectStyle {
+- (id) initWithHandler:(Fn<void(FullScreenEvent)>)handler {
 	if (self = [super init]) {
-		_toggleCustomTitleVisibility = toggleCustomTitleVisibility;
-		_enforceCorrectStyle = enforceCorrectStyle;
+		_handler = std::move(handler);
 	}
 	return self;
 }
 
 - (void) windowWillEnterFullScreen:(NSNotification *)aNotification {
-	_toggleCustomTitleVisibility(false);
+	_handler(FullScreenEvent::WillEnter);
 }
 
 - (void) windowWillExitFullScreen:(NSNotification *)aNotification {
-	_enforceCorrectStyle();
-	_toggleCustomTitleVisibility(true);
+	_handler(FullScreenEvent::WillExit);
+}
+
+- (void) windowDidEnterFullScreen:(NSNotification *)aNotification {
+	_handler(FullScreenEvent::DidEnter);
 }
 
 - (void) windowDidExitFullScreen:(NSNotification *)aNotification {
-	_enforceCorrectStyle();
+	_handler(FullScreenEvent::DidExit);
 }
 
-@end // @implementation MainWindowObserver
+@end // @implementation WindowObserver
 
-namespace Ui {
-namespace Platform {
+namespace Ui::Platform {
 namespace {
 
 class LayerCreationChecker : public QObject {
@@ -137,6 +140,7 @@ public:
 	void activateBeforeNativeMove();
 	void setStaysOnTop(bool enabled);
 	void setNativeTitleVisibility(bool visible);
+	void reapplyCustomTitle();
 	void close();
 
 private:
@@ -146,8 +150,7 @@ private:
 	void revalidateWeakPointers() const;
 	void initCustomTitle();
 
-	[[nodiscard]] Fn<void(bool)> toggleCustomTitleCallback();
-	[[nodiscard]] Fn<void()> enforceStyleCallback();
+	[[nodiscard]] Fn<void(FullScreenEvent)> handleFullScreenEventCallback();
 	void enforceStyle();
 
 	const not_null<WindowHelper*> _owner;
@@ -245,7 +248,7 @@ void WindowHelper::Private::setNativeTitleVisibility(bool visible) {
 }
 
 void WindowHelper::Private::close() {
-	const auto weak = Ui::MakeWeak(_owner->window());
+	const auto weak = base::make_weak(_owner->window());
 	QCloseEvent e;
 	qApp->sendEvent(_owner->window(), &e);
 	if (!e.isAccepted() || !weak) {
@@ -257,15 +260,25 @@ void WindowHelper::Private::close() {
 	}
 }
 
-Fn<void(bool)> WindowHelper::Private::toggleCustomTitleCallback() {
-	return crl::guard(_owner->window(), [=](bool visible) {
-		_owner->_titleVisible = visible;
-		_owner->updateCustomTitleVisibility(true);
+Fn<void(FullScreenEvent)> WindowHelper::Private::handleFullScreenEventCallback() {
+	return crl::guard(_owner->window(), [=](FullScreenEvent event) {
+		switch (event) {
+		case FullScreenEvent::WillEnter:
+			_owner->_titleVisible = false;
+			_owner->updateCustomTitleVisibility(true);
+			break;
+		case FullScreenEvent::WillExit:
+			enforceStyle();
+			_owner->_titleVisible = true;
+			_owner->updateCustomTitleVisibility(true);
+			break;
+		case FullScreenEvent::DidEnter:
+			break;
+		case FullScreenEvent::DidExit:
+			enforceStyle();
+			break;
+		}
 	});
-}
-
-Fn<void()> WindowHelper::Private::enforceStyleCallback() {
-	return crl::guard(_owner->window(), [=] { enforceStyle(); });
 }
 
 void WindowHelper::Private::enforceStyle() {
@@ -276,7 +289,7 @@ void WindowHelper::Private::enforceStyle() {
 }
 
 void WindowHelper::Private::initOpenGL() {
-	auto forceOpenGL = std::make_unique<QOpenGLWidget>(_owner->window());
+	//auto forceOpenGL = std::make_unique<QOpenGLWidget>(_owner->window());
 }
 
 void WindowHelper::Private::resolveWeakPointers() {
@@ -304,12 +317,15 @@ void WindowHelper::Private::initCustomTitle() {
 		return;
 	}
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+	_owner->window()->setWindowFlag(Qt::NoTitleBarBackgroundHint);
+#endif
 	[_nativeWindow setTitlebarAppearsTransparent:YES];
-
+	[_nativeWindow setTitleVisibility:NSWindowTitleHidden];
 	if (_observer) {
 		[_observer release];
 	}
-	_observer = [[WindowObserver alloc] initWithToggle:toggleCustomTitleCallback() enforce:enforceStyleCallback()];
+	_observer = [[WindowObserver alloc] initWithHandler:handleFullScreenEventCallback()];
 	[[NSNotificationCenter defaultCenter] addObserver:_observer selector:@selector(windowWillEnterFullScreen:) name:NSWindowWillEnterFullScreenNotification object:_nativeWindow];
 	[[NSNotificationCenter defaultCenter] addObserver:_observer selector:@selector(windowWillExitFullScreen:) name:NSWindowWillExitFullScreenNotification object:_nativeWindow];
 	[[NSNotificationCenter defaultCenter] addObserver:_observer selector:@selector(windowDidExitFullScreen:) name:NSWindowDidExitFullScreenNotification object:_nativeWindow];
@@ -320,6 +336,45 @@ void WindowHelper::Private::initCustomTitle() {
 	//
 	// Tried to backport a fix, testing.
 	[_nativeWindow setStyleMask:[_nativeWindow styleMask] | NSWindowStyleMaskFullSizeContentView];
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+	// Qt 6.11 may recreate both the NSView and NSWindow after this
+	// point (e.g. in recreateWindowIfNeeded during show). The weak
+	// pointers to the old view/window become nil. Poll from winId()
+	// until the new window appears and reapply customizations.
+	const auto guard = base::make_weak(_owner->window());
+	const auto savedWindow = _nativeWindow;
+	const auto poll = std::make_shared<Fn<void(int)>>();
+	*poll = [this, guard, savedWindow, poll](int attempts) {
+		if (!guard || attempts <= 0) return;
+		const auto wid = _owner->window()->winId();
+		if (!wid) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				(*poll)(attempts - 1);
+			});
+			return;
+		}
+		const auto freshView = reinterpret_cast<NSView*>(wid);
+		const auto freshWindow = freshView ? [freshView window] : nil;
+		if (!freshWindow) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				(*poll)(attempts - 1);
+			});
+			return;
+		}
+		if (freshWindow != savedWindow) {
+			_nativeView = freshView;
+			_nativeWindow = freshWindow;
+			_owner->window()->setWindowFlag(Qt::NoTitleBarBackgroundHint);
+			[freshWindow setTitlebarAppearsTransparent:YES];
+			[freshWindow setTitleVisibility:NSWindowTitleHidden];
+			[freshWindow setStyleMask:[freshWindow styleMask]
+				| NSWindowStyleMaskFullSizeContentView];
+		}
+	};
+	dispatch_async(dispatch_get_main_queue(), ^{ (*poll)(50); });
+#endif
+
 	auto inner = [_nativeWindow contentLayoutRect];
 	auto full = [_nativeView frame];
 	_customTitleHeight = qMax(qRound(full.size.height - inner.size.height), 0);
@@ -434,7 +489,7 @@ void WindowHelper::init() {
 	updateCustomTitleVisibility(true);
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		Ui::ForceFullRepaint(window());
 	}, window()->lifetime());
 
@@ -442,7 +497,7 @@ void WindowHelper::init() {
 		window()->sizeValue(),
 		_title->heightValue(),
 		_title->shownValue()
-	) | rpl::start_with_next([=](QSize size, int titleHeight, bool shown) {
+	) | rpl::on_next([=](QSize size, int titleHeight, bool shown) {
 		if (!shown) {
 			titleHeight = 0;
 		}
@@ -472,5 +527,77 @@ bool NativeWindowFrameSupported() {
 	return false;
 }
 
-} // namespace Platform
-} // namespace Ui
+rpl::producer<FullScreenEvent> FullScreenEvents(
+		not_null<RpWidget*> window) {
+	return [=](auto consumer) {
+		auto result = rpl::lifetime();
+
+		struct State {
+			~State() {
+				if (observer) {
+					[observer release];
+				}
+			}
+
+			WindowObserver *observer = nullptr;
+			rpl::lifetime screenChanges;
+		};
+		const auto state = result.make_state<State>();
+
+		const auto attach = [=](WId winId) {
+			if (const auto was = base::take(state->observer)) {
+				[was release];
+			}
+			if (!winId) {
+				return false;
+			}
+			const auto view = reinterpret_cast<NSView*>(winId);
+			const auto win = [view window];
+			if (!win) {
+				return false;
+			}
+			const auto handler = [=](FullScreenEvent event) {
+				consumer.put_next_copy(event);
+			};
+			state->observer = [[WindowObserver alloc] initWithHandler:handler];
+
+			const auto add = [&](NSNotificationName name, SEL selector) {
+				[[NSNotificationCenter defaultCenter]
+					addObserver:state->observer
+					selector:selector
+					name:name
+					object:win];
+			};
+			add(NSWindowWillEnterFullScreenNotification, @selector(windowWillEnterFullScreen:));
+			add(NSWindowWillExitFullScreenNotification, @selector(windowWillExitFullScreen:));
+			add(NSWindowDidEnterFullScreenNotification, @selector(windowDidEnterFullScreen:));
+			add(NSWindowDidExitFullScreenNotification, @selector(windowDidExitFullScreen:));
+			return true;
+		};
+
+		window->winIdValue() | rpl::on_next([=](WId winId) {
+			state->screenChanges.destroy();
+			if (attach(winId)) {
+				return;
+			}
+			// NSView exists but its NSWindow is not attached yet — happens
+			// when the parent window is on a screen with a different device
+			// pixel ratio and Qt is mid-flight rebuilding the native window.
+			// Re-try whenever Qt assigns a screen to the QWindow.
+			const auto handle = window->windowHandle();
+			if (!handle) {
+				return;
+			}
+			base::qt_signal_producer(
+				handle,
+				&QWindow::screenChanged
+			) | rpl::on_next([=](QScreen*) {
+				attach(window->internalWinId());
+			}, state->screenChanges);
+		}, result);
+
+		return result;
+	};
+}
+
+} // namespace Ui::Platform

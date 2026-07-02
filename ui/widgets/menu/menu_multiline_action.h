@@ -18,16 +18,29 @@ class FlatLabel;
 class RpWidget;
 } // namespace Ui
 
+namespace Ui::Text {
+struct MarkedContext;
+} // namespace Ui::Text
+
 namespace Ui::Menu {
 
 class MultilineAction final : public ItemBase {
 public:
 	MultilineAction(
-		not_null<Ui::RpWidget*> parent,
+		not_null<Menu*> parent,
 		const style::Menu &st,
 		const style::FlatLabel &stLabel,
 		QPoint labelPosition,
 		TextWithEntities &&about,
+		const style::icon *icon = nullptr,
+		const style::icon *iconOver = nullptr);
+	MultilineAction(
+		not_null<Menu*> parent,
+		const style::Menu &st,
+		const style::FlatLabel &stLabel,
+		QPoint labelPosition,
+		TextWithEntities &&about,
+		const Text::MarkedContext &context,
 		const style::icon *icon = nullptr,
 		const style::icon *iconOver = nullptr);
 

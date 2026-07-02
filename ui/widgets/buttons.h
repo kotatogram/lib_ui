@@ -12,9 +12,14 @@
 #include "ui/text/text.h"
 #include "styles/style_widgets.h"
 
+#include <cstddef>
 #include <memory>
 
 class Painter;
+
+namespace st {
+extern const style::SettingsButton &defaultSettingsButton;
+} // namespace st
 
 namespace Ui {
 
@@ -26,10 +31,15 @@ class LinkButton : public AbstractButton {
 public:
 	LinkButton(QWidget *parent, const QString &text, const style::LinkButton &st = st::defaultLinkButton);
 
-	int naturalWidth() const override;
-
 	void setText(const QString &text);
 	void setColorOverride(std::optional<QColor> textFg);
+
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::Link;
+	}
+	QString accessibilityName() override {
+		return _text;
+	}
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -38,6 +48,8 @@ protected:
 
 private:
 	void resizeToText();
+
+	int resizeGetHeight(int newWidth) override;
 
 	const style::LinkButton &_st;
 	QString _text;
@@ -97,6 +109,10 @@ class FlatButton : public RippleButton {
 public:
 	FlatButton(QWidget *parent, const QString &text, const style::FlatButton &st);
 
+	QString accessibilityName() override {
+		return _text;
+	}
+
 	void setText(const QString &text);
 	void setWidth(int w);
 	void setColorOverride(std::optional<QColor> color);
@@ -119,6 +135,11 @@ private:
 
 };
 
+enum class RoundButtonTextTransform : uchar {
+	NoTransform,
+	ToUpper,
+};
+
 class RoundButton : public RippleButton {
 public:
 	RoundButton(
@@ -126,7 +147,19 @@ public:
 		rpl::producer<QString> text,
 		const style::RoundButton &st);
 
+	void setTextTransform(RoundButtonTextTransform transform);
+
+	QString accessibilityName() override {
+		return _textFull.current().text;
+	}
+
+	[[nodiscard]] const style::RoundButton &st() const {
+		return _st;
+	}
+
 	void setText(rpl::producer<QString> text);
+	void setText(rpl::producer<TextWithEntities> text);
+	void setContext(const Text::MarkedContext &context);
 
 	void setNumbersText(const QString &numbersText) {
 		setNumbersText(numbersText, numbersText.toInt());
@@ -136,19 +169,21 @@ public:
 	}
 	void setWidthChangedCallback(Fn<void()> callback);
 	void setBrushOverride(std::optional<QBrush> brush);
+	void setRippleOverride(std::optional<QColor> color);
 	void setPenOverride(std::optional<QPen> pen);
+	void setTextFgOverride(std::optional<QColor> textFg);
+	void setIconOverride(const style::icon *icon);
 	void finishNumbersAnimation();
 
 	[[nodiscard]] int contentWidth() const;
 
 	void setFullWidth(int newFullWidth);
 	void setFullRadius(bool enabled);
-
-	enum class TextTransform {
-		NoTransform,
-		ToUpper,
-	};
-	void setTextTransform(TextTransform transform);
+	void setCornerRadii(
+		int topLeft,
+		int topRight,
+		int bottomLeft,
+		int bottomRight);
 
 	~RoundButton();
 
@@ -161,10 +196,10 @@ protected:
 private:
 	void setNumbersText(const QString &numbersText, int numbers);
 	void numbersAnimationCallback();
-	void resizeToText(const QString &text);
+	void resizeToText(const TextWithEntities &text);
 	[[nodiscard]] int addedWidth() const;
 
-	rpl::variable<QString> _textFull;
+	rpl::variable<TextWithEntities> _textFull;
 	Ui::Text::String _text;
 
 	std::unique_ptr<NumbersAnimation> _numbers;
@@ -173,12 +208,17 @@ private:
 
 	const style::RoundButton &_st;
 	std::optional<QBrush> _brushOverride;
+	std::optional<QColor> _rippleOverride;
 	std::optional<QPen> _penOverride;
+	std::optional<QColor> _textFgOverride;
+	const style::icon *_iconOverride = nullptr;
 	RoundRect _roundRect;
 	RoundRect _roundRectOver;
+	Text::MarkedContext _context;
 
-	TextTransform _transform = TextTransform::ToUpper;
+	RoundButtonTextTransform _transform = RoundButtonTextTransform::NoTransform;
 	bool _fullRadius = false;
+	std::optional<std::array<int, 4>> _cornerRadii;
 
 };
 
@@ -190,6 +230,7 @@ public:
 
 	// Pass nullptr to restore the default icon.
 	void setIconOverride(const style::icon *iconOverride, const style::icon *iconOverOverride = nullptr);
+	void setIconColorOverride(std::optional<QColor> colorOverride);
 	void setRippleColorOverride(const style::color *colorOverride);
 
 protected:
@@ -207,6 +248,7 @@ private:
 	const style::icon *_iconOverride = nullptr;
 	const style::icon *_iconOverrideOver = nullptr;
 	const style::color *_rippleColorOverride = nullptr;
+	std::optional<QColor> _iconColorOverride;
 
 	Ui::Animations::Simple _a_over;
 
@@ -260,12 +302,28 @@ class SettingsButton : public Ui::RippleButton {
 public:
 	SettingsButton(
 		QWidget *parent,
-		rpl::producer<QString> &&text);
+		rpl::producer<QString> &&text,
+		const style::SettingsButton &st = st::defaultSettingsButton);
 	SettingsButton(
 		QWidget *parent,
-		rpl::producer<QString> &&text,
-		const style::SettingsButton &st);
+		rpl::producer<TextWithEntities> &&text,
+		const style::SettingsButton &st = st::defaultSettingsButton,
+		const Text::MarkedContext &context = {});
+	SettingsButton(
+		QWidget *parent,
+		std::nullptr_t,
+		const style::SettingsButton &st = st::defaultSettingsButton);
 	~SettingsButton();
+
+	QString accessibilityName() override {
+		return _text.toString();
+	}
+	AccessibilityState accessibilityState() const override;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 11, 0)
+	QAccessible::Role accessibilityRole() override {
+		return _toggle ? QAccessible::Role::Switch : QAccessible::Role::Button;
+	}
+#endif
 
 	SettingsButton *toggleOn(
 		rpl::producer<bool> &&toggled,
@@ -298,15 +356,30 @@ protected:
 	[[nodiscard]] QRect maybeToggleRect() const;
 
 private:
-	void setText(QString &&text);
-	QRect toggleRect() const;
+	void setText(TextWithEntities &&text);
+	[[nodiscard]] QRect toggleRect() const;
 
 	const style::SettingsButton &_st;
 	style::margins _padding;
 	Ui::Text::String _text;
 	std::unique_ptr<Ui::ToggleView> _toggle;
 	std::optional<QColor> _textColorOverride;
+	Text::MarkedContext _context;
 
 };
+
+[[nodiscard]] not_null<RippleButton*> CreateSimpleRectButton(
+	QWidget *parent,
+	const style::RippleAnimation &st);
+[[nodiscard]] not_null<RippleButton*> CreateSimpleSettingsButton(
+	QWidget *parent,
+	const style::RippleAnimation &st,
+	const style::color &bg);
+[[nodiscard]] not_null<RippleButton*> CreateSimpleCircleButton(
+	QWidget *parent,
+	const style::RippleAnimation &st);
+[[nodiscard]] not_null<RippleButton*> CreateSimpleRoundButton(
+	QWidget *parent,
+	const style::RippleAnimation &st);
 
 } // namespace Ui

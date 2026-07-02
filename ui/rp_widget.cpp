@@ -6,31 +6,17 @@
 //
 #include "ui/rp_widget.h"
 
+#include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
+#include "ui/accessible/ui_accessible_item.h"
+#include "ui/accessible/ui_accessible_widget.h"
 #include "ui/gl/gl_detection.h"
 
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
 #include <QtGui/QColorSpace>
+#include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
-
-TWidget::TWidget(QWidget *parent)
-: TWidgetHelper<QWidget>(parent) {
-	[[maybe_unused]] static const auto Once = [] {
-		auto format = QSurfaceFormat::defaultFormat();
-		format.setSwapInterval(0);
-#ifdef DESKTOP_APP_USE_ANGLE
-		format.setRedBufferSize(8);
-		format.setGreenBufferSize(8);
-		format.setBlueBufferSize(8);
-#endif // DESKTOP_APP_USE_ANGLE
-#ifdef Q_OS_MAC
-		format.setColorSpace(QColorSpace::SRgb);
-#endif // Q_OS_MAC
-		QSurfaceFormat::setDefaultFormat(format);
-		return true;
-	}();
-}
 
 namespace Ui {
 namespace {
@@ -63,12 +49,12 @@ void ResizeFitChild(
 		not_null<RpWidget*> child,
 		int heightMin) {
 	parent->widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		child->resizeToWidth(width);
 	}, child->lifetime());
 
 	child->heightValue(
-	) | rpl::start_with_next([=](int height) {
+	) | rpl::on_next([=](int height) {
 		parent->resize(parent->width(), std::max(height, heightMin));
 	}, child->lifetime());
 }
@@ -145,6 +131,14 @@ rpl::producer<QRect> RpWidgetWrap::paintRequest() const {
 	return eventStreams().paint.events();
 }
 
+void RpWidgetWrap::paintOn(Fn<void(QPainter&)> callback) {
+	const auto widget = rpWidget();
+	paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(widget);
+		callback(p);
+	}, lifetime());
+}
+
 rpl::producer<> RpWidgetWrap::alive() const {
 	return eventStreams().alive.events();
 }
@@ -167,6 +161,46 @@ rpl::producer<> RpWidgetWrap::macWindowDeactivateEvents() const {
 rpl::producer<WId> RpWidgetWrap::winIdValue() const {
 	auto &stream = eventStreams().winId;
 	return stream.events_starting_with(rpWidget()->internalWinId());
+}
+
+bool RpWidgetWrap::externalWidthWasSet() const {
+	if (const auto streams = _eventStreams.get()) {
+		return streams->externalWidthWasSet != 0;
+	}
+	return false;
+}
+
+int RpWidgetWrap::naturalWidth() const {
+	if (const auto streams = _eventStreams.get()) {
+		return (streams->naturalWidth != kNaturalWidthAny)
+			? streams->naturalWidth
+			: -1;
+	}
+	return -1;
+}
+
+rpl::producer<int> RpWidgetWrap::naturalWidthValue() const {
+	const auto &streams = eventStreams();
+	return streams.naturalWidthChanges.events_starting_with_copy(
+		naturalWidth());
+}
+
+void RpWidgetWrap::setNaturalWidth(int value) {
+	const auto set = uint32((value >= 0) ? value : kNaturalWidthAny);
+	auto &streams = eventStreams();
+	if (streams.naturalWidth != set) {
+		auto weak = base::make_weak(rpWidget());
+		streams.naturalWidth = set;
+		streams.naturalWidthChanges.fire(naturalWidth());
+
+		if (weak && !streams.externalWidthWasSet) {
+			callResizeToNaturalWidth();
+		}
+	}
+}
+
+QMargins RpWidgetWrap::getMargins() const {
+	return QMargins();
 }
 
 rpl::lifetime &RpWidgetWrap::lifetime() {
@@ -276,6 +310,8 @@ RpWidgetWrap::Initer::Initer(QWidget *parent, bool setZeroGeometry) {
 	}
 }
 
+RpWidgetWrap::Initer::~Initer() = default;
+
 void RpWidgetWrap::visibilityChangedHook(bool wasVisible, bool nowVisible) {
 	if (nowVisible != wasVisible) {
 		if (auto streams = _eventStreams.get()) {
@@ -289,6 +325,207 @@ auto RpWidgetWrap::eventStreams() const -> EventStreams& {
 		_eventStreams = std::make_unique<EventStreams>();
 	}
 	return *_eventStreams;
+}
+
+void AccessibilityState::writeTo(QAccessible::State &state) {
+	state.checkable = checkable ? 1 : 0;
+	state.checked = checked ? 1 : 0;
+	state.pressed = pressed ? 1 : 0;
+	state.readOnly = readOnly ? 1 : 0;
+	state.selected = selected ? 1 : 0;
+}
+
+RpWidget::RpWidget(QWidget *parent)
+: RpWidgetBase<QWidget>(parent) {
+	[[maybe_unused]] static const auto Once = [] {
+		auto format = QSurfaceFormat::defaultFormat();
+		format.setSwapInterval(::Platform::MetalSupported() ? 1 : 0);
+#ifdef DESKTOP_APP_USE_ANGLE
+		format.setRedBufferSize(8);
+		format.setGreenBufferSize(8);
+		format.setBlueBufferSize(8);
+#endif // DESKTOP_APP_USE_ANGLE
+#ifdef Q_OS_MAC
+		format.setColorSpace(QColorSpace::SRgb);
+#endif // Q_OS_MAC
+		QSurfaceFormat::setDefaultFormat(format);
+		return true;
+	}();
+}
+
+RpWidget::~RpWidget() {
+	_initer.accessibleItems = nullptr;
+}
+
+QAccessibleInterface *RpWidget::accessibilityCreate() {
+	return (accessibilityRole() != QAccessible::Role::NoRole)
+		? new Accessible::Widget(this)
+		: nullptr;
+}
+
+QAccessible::Role RpWidget::accessibilityRole() {
+	return QAccessible::Role::NoRole;
+}
+
+Qt::FocusPolicy RpWidget::accessibilityFocusPolicy() {
+	const auto role = accessibilityRole();
+	const auto focusable = (role == QAccessible::Role::Button)
+		|| (role == QAccessible::Role::ButtonMenu)
+		|| (role == QAccessible::Role::Link)
+		|| (role == QAccessible::Role::CheckBox)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 11, 0)
+		|| (role == QAccessible::Role::Switch)
+#endif
+		|| (role == QAccessible::Role::Slider);
+	return focusable ? Qt::TabFocus : Qt::NoFocus;
+}
+
+QAccessible::Role RpWidget::accessibilityChildRole() const {
+	return QAccessible::Role::NoRole;
+}
+
+QString RpWidget::accessibilityChildName(int index) const {
+	return QString();
+}
+
+QString RpWidget::accessibilityChildDescription(int index) const {
+	return QString();
+}
+
+QString RpWidget::accessibilityChildValue(int index) const {
+	return QString();
+}
+
+QAccessible::State RpWidget::accessibilityChildState(int index) const {
+	return QAccessible::State();
+}
+
+QRect RpWidget::accessibilityChildRect(int index) const {
+	return QRect();
+}
+
+int RpWidget::accessibilityChildColumnCount(int row) const {
+	return 0;
+}
+
+QAccessible::Role RpWidget::accessibilityChildSubItemRole() const {
+	return QAccessible::StaticText;
+}
+
+QString RpWidget::accessibilityChildSubItemName(int row, int column) const {
+	return QString();
+}
+
+QString RpWidget::accessibilityChildSubItemValue(int row, int column) const {
+	return QString();
+}
+
+void RpWidget::accessibilityChildNameChanged(int index) {
+	QAccessibleEvent event(this, QAccessible::NameChanged);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildDescriptionChanged(int index) {
+	QAccessibleEvent event(this, QAccessible::DescriptionChanged);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildValueChanged(int index) {
+	QAccessibleEvent event(this, QAccessible::ValueChanged);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildStateChanged(
+		int index,
+		AccessibilityState changes) {
+	auto fields = QAccessible::State();
+	changes.writeTo(fields);
+	QAccessibleStateChangeEvent event(this, fields);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildFocused(int index) {
+	QAccessibleEvent event(this, QAccessible::Focus);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+QString RpWidget::accessibilityName() {
+	return QWidget::accessibleName();
+}
+
+void RpWidget::accessibilityNameChanged() {
+	QAccessibleEvent event(this, QAccessible::NameChanged);
+	QAccessible::updateAccessibility(&event);
+}
+
+QString RpWidget::accessibilityDescription() {
+	return QWidget::accessibleDescription();
+}
+
+void RpWidget::accessibilityDescriptionChanged() {
+	QAccessibleEvent event(this, QAccessible::DescriptionChanged);
+	QAccessible::updateAccessibility(&event);
+}
+
+AccessibilityState RpWidget::accessibilityState() const {
+	return {};
+}
+
+void RpWidget::accessibilityStateChanged(AccessibilityState changes) {
+	auto fields = QAccessible::State();
+	changes.writeTo(fields);
+	QAccessibleStateChangeEvent event(this, fields);
+	QAccessible::updateAccessibility(&event);
+}
+
+QString RpWidget::accessibilityValue() const {
+	return QString();
+}
+
+void RpWidget::accessibilityValueChanged() {
+	QAccessibleValueChangeEvent event(this, accessibilityValue());
+	QAccessible::updateAccessibility(&event);
+}
+
+QStringList RpWidget::accessibilityActionNames() {
+	return QStringList();
+}
+
+void RpWidget::accessibilityDoAction(const QString &name) {
+}
+
+int RpWidget::accessibilityChildCount() const {
+	return -1;
+}
+
+RpWidget *RpWidget::accessibilityParent() const {
+	return nullptr;
+}
+
+QAccessibleInterface *RpWidget::accessibilityChildInterface(
+		int index) const {
+	const auto count = accessibilityChildCount();
+	if (count < 0 || index < 0 || index >= count) {
+		return nullptr;
+	}
+	auto &items = accessibleItems();
+	auto &ids = items.list;
+	if (int(ids.size()) < count) {
+		ids.resize(count);
+	}
+	if (!ids[index]) {
+		ids[index] = Accessible::UniqueId(
+			QAccessible::registerAccessibleInterface(
+				new Accessible::Item(
+					const_cast<RpWidget*>(this),
+					index)));
+	}
+	return ids[index].get();
 }
 
 } // namespace Ui

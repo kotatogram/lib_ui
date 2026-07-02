@@ -40,7 +40,7 @@ namespace {
 }
 
 TextParseOptions MenuTextOptions = {
-	TextParseLinks, // flags
+	TextParseLinks | TextParseMarkdown, // flags
 	0, // maxw
 	0, // maxh
 	Qt::LayoutDirectionAuto, // dir
@@ -49,7 +49,7 @@ TextParseOptions MenuTextOptions = {
 } // namespace
 
 Action::Action(
-	not_null<RpWidget*> parent,
+	not_null<Menu*> parent,
 	const style::Menu &st,
 	not_null<QAction*> action,
 	const style::icon *icon,
@@ -62,10 +62,9 @@ Action::Action(
 , _height(_st.itemPadding.top()
 	+ _st.itemStyle.font->height
 	+ _st.itemPadding.bottom()) {
-
 	setAcceptBoth(true);
 
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	processAction();
 
 	enableMouseSelecting();
@@ -75,6 +74,20 @@ Action::Action(
 
 bool Action::hasSubmenu() const {
 	return _action->menu() != nullptr;
+}
+
+int Action::accessibilityChildCount() const {
+	return hasSubmenu() ? 1 : -1;
+}
+
+QAccessible::Role Action::accessibilityChildRole() const {
+	return QAccessible::PopupMenu;
+}
+
+QAccessible::State Action::accessibilityChildState(int index) const {
+	QAccessible::State state;
+	state.invisible = 1;
+	return state;
 }
 
 void Action::paintEvent(QPaintEvent *e) {
@@ -139,6 +152,8 @@ void Action::paint(Painter &p) {
 }
 
 void Action::processAction() {
+	accessibilityNameChanged();
+
 	setPointerCursor(isEnabled());
 	if (_action->text().isEmpty()) {
 		_shortcut = QString();
@@ -152,17 +167,21 @@ void Action::processAction() {
 	const auto actionShortcut = (actionTextParts.size() > 1)
 		? actionTextParts[1]
 		: QString();
-	_text.setMarkedText(
-		_st.itemStyle,
-		ParseMenuItem(actionText),
-		MenuTextOptions);
+	setMarkedText(ParseMenuItem(actionText), actionShortcut);
+}
+
+void Action::setMarkedText(
+		TextWithEntities text,
+		QString shortcut,
+		const Text::MarkedContext &context) {
+	_text.setMarkedText(_st.itemStyle, text, MenuTextOptions, context);
 	const auto textWidth = _text.maxWidth();
 	const auto &padding = _st.itemPadding;
 
 	const auto additionalWidth = hasSubmenu()
 		? (_st.itemRightSkip + _st.arrow.width())
-		: (!actionShortcut.isEmpty())
-		? (_st.itemRightSkip + _st.itemStyle.font->width(actionShortcut))
+		: (!shortcut.isEmpty())
+		? (_st.itemRightSkip + _st.itemStyle.font->width(shortcut))
 		: 0;
 	const auto goodWidth = padding.left()
 		+ textWidth
@@ -171,9 +190,13 @@ void Action::processAction() {
 
 	const auto w = std::clamp(goodWidth, _st.widthMin, _st.widthMax);
 	_textWidth = w - (goodWidth - textWidth);
-	_shortcut = actionShortcut;
+	_shortcut = shortcut;
 	setMinWidth(w);
 	update();
+}
+
+const style::Menu &Action::st() const {
+	return _st;
 }
 
 bool Action::isEnabled() const {
@@ -201,7 +224,9 @@ void Action::handleKeyPress(not_null<QKeyEvent*> e) {
 		return;
 	}
 	const auto key = e->key();
-	if (key == Qt::Key_Enter || key == Qt::Key_Return) {
+	if (key == Qt::Key_Enter
+		|| key == Qt::Key_Return
+		|| key == Qt::Key_Space) {
 		setClicked(TriggeredSource::Keyboard);
 		return;
 	}

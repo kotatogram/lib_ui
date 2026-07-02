@@ -76,6 +76,13 @@ public:
 		const style::LabelSimple &st = st::defaultLabelSimple,
 		const QString &value = QString());
 
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::StaticText;
+	}
+	QString accessibilityName() override {
+		return _fullText;
+	}
+
 	// This method also resizes the label.
 	void setText(const QString &newText, bool *outTextChanged = nullptr);
 
@@ -116,7 +123,14 @@ public:
 		rpl::producer<TextWithEntities> &&text,
 		const style::FlatLabel &st = st::defaultFlatLabel,
 		const style::PopupMenu &stMenu = st::defaultPopupMenu,
-		const Fn<std::any(Fn<void()>)> &makeContext = nullptr);
+		const Text::MarkedContext &context = {});
+
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::StaticText;
+	}
+	QString accessibilityName() override {
+		return _text.toString();
+	}
 
 	[[nodiscard]] const style::FlatLabel &st() const {
 		return _st;
@@ -128,12 +142,15 @@ public:
 	void setText(const QString &text);
 	void setMarkedText(
 		const TextWithEntities &textWithEntities,
-		const std::any &context = {});
+		Text::MarkedContext context = {});
 	void setSelectable(bool selectable);
 	void setDoubleClickSelectsParagraph(bool doubleClickSelectsParagraph);
 	void setContextCopyText(const QString &copyText);
 	void setBreakEverywhere(bool breakEverywhere);
+	void setElisionMiddle(bool elisionMiddle);
 	void setTryMakeSimilarLines(bool tryMakeSimilarLines);
+	void setSkipBlock(int width, int height);
+	void setColors(std::span<Text::SpecialColor> colors);
 	enum class WhichAnimationsPaused {
 		None,
 		CustomEmoji,
@@ -145,7 +162,6 @@ public:
 	}
 
 	[[nodiscard]] int textMaxWidth() const;
-	int naturalWidth() const override;
 	QMargins getMargins() const override;
 
 	void setLink(uint16 index, const ClickHandlerPtr &lnk);
@@ -155,6 +171,9 @@ public:
 	void setClickHandlerFilter(ClickHandlerFilter &&filter);
 	void overrideLinkClickHandler(Fn<void()> handler);
 	void overrideLinkClickHandler(Fn<void(QString url)> handler);
+
+	void setPreCache(Fn<not_null<Text::QuotePaintCache*>()> make);
+	void setBlockquoteCache(Fn<not_null<Text::QuotePaintCache*>()> make);
 
 	struct ContextMenuRequest {
 		not_null<PopupMenu*> menu;
@@ -181,6 +200,8 @@ public:
 		QPoint fromPosition = QPoint(),
 		QPoint toPosition = QPoint());
 
+	[[nodiscard]] std::vector<int> countLineWidths() const;
+
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
@@ -194,7 +215,8 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override;
 	void contextMenuEvent(QContextMenuEvent *e) override;
 	bool eventHook(QEvent *e) override; // calls touchEvent when necessary
-	void touchEvent(QTouchEvent *e);
+	bool handleTouchEvent(QTouchEvent *e);
+	bool eventFilter(QObject *receiver, QEvent *e) override;
 
 	int resizeGetHeight(int newWidth) override;
 
@@ -209,6 +231,10 @@ private:
 	void init();
 	void textUpdated();
 
+	[[nodiscard]] QTouchEvent *checkTouchEvent(QEvent *e);
+	void startTouchInProgress();
+	void cancelTouchInProgress();
+
 	Text::StateResult dragActionUpdate();
 	Text::StateResult dragActionStart(const QPoint &p, Qt::MouseButton button);
 	Text::StateResult dragActionFinish(const QPoint &p, Qt::MouseButton button);
@@ -216,9 +242,10 @@ private:
 	Text::StateResult getTextState(const QPoint &m) const;
 	void refreshCursor(bool uponSymbol);
 
-	int countTextWidth() const;
+	int countTextWidth(int newWidth) const;
 	int countTextHeight(int textWidth);
 	void refreshSize();
+	bool allowTextSelectionByHandler(const ClickHandlerPtr &handler) const;
 
 	enum class ContextMenuReason {
 		FromEvent,
@@ -232,11 +259,14 @@ private:
 	std::optional<QColor> _textColorOverride;
 	float64 _opacity = 1.;
 
-	int _allowedWidth = 0;
 	int _textWidth = 0;
 	int _fullTextHeight = 0;
 	bool _breakEverywhere = false;
+	bool _elisionMiddle = false;
 	bool _tryMakeSimilarLines = false;
+	int _skipBlockWidth = 0;
+	int _skipBlockHeight = 0;
+	std::span<Text::SpecialColor> _colors;
 
 	style::cursor _cursor = style::cur_default;
 	bool _selectable = false;
@@ -267,6 +297,9 @@ private:
 	ClickHandlerFilter _clickHandlerFilter;
 	Fn<WhichAnimationsPaused()> _animationsPausedCallback;
 
+	Fn<not_null<Text::QuotePaintCache*>()> _preCacheCallback;
+	Fn<not_null<Text::QuotePaintCache*>()> _blockquoteCacheCallback;
+
 	// text selection and context menu by touch support (at least Windows Surface tablets)
 	bool _touchSelect = false;
 	bool _touchInProgress = false;
@@ -281,14 +314,15 @@ public:
 		QWidget *parent,
 		object_ptr<RpWidget> &&child,
 		const style::margins &padding,
+		const style::DividerBar &st = st::defaultDividerBar,
 		RectParts parts = RectPart::Top | RectPart::Bottom);
-
-	int naturalWidth() const override;
 
 protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
+	void wrappedNaturalWidthUpdated(int width) override;
+
 	object_ptr<BoxContentDivider> _background;
 
 };

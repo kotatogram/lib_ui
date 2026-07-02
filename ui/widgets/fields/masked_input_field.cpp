@@ -8,7 +8,6 @@
 
 #include "base/qt/qt_common_adapters.h"
 #include "ui/painter.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/integration.h"
 #include "styles/palette.h"
@@ -72,12 +71,13 @@ MaskedInputField::MaskedInputField(
 	setAlignment(_st.textAlign);
 
 	_placeholderFull.value(
-	) | rpl::start_with_next([=](const QString &text) {
+	) | rpl::on_next([=](const QString &text) {
 		refreshPlaceholder(text);
+		setAccessibleName(text);
 	}, lifetime());
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updatePalette();
 	}, lifetime());
 	updatePalette();
@@ -98,10 +98,6 @@ MaskedInputField::MaskedInputField(
 	QLineEdit::setTextMargins(0, 0, 0, 0);
 	setContentsMargins(_textMargins + QMargins(-2, -1, -2, -1));
 	setFrame(false);
-
-	setAttribute(Qt::WA_AcceptTouchEvents);
-	_touchTimer.setSingleShot(true);
-	connect(&_touchTimer, SIGNAL(timeout()), this, SLOT(onTouchTimer()));
 
 	setTextMargins(_st.textMargins);
 
@@ -147,89 +143,6 @@ void MaskedInputField::setTextMargins(const QMargins &mrg) {
 	_textMargins = mrg;
 	setContentsMargins(_textMargins + QMargins(-2, -1, -2, -1));
 	refreshPlaceholder(_placeholderFull.current());
-}
-
-void MaskedInputField::onTouchTimer() {
-	_touchRightButton = true;
-}
-
-bool MaskedInputField::eventHook(QEvent *e) {
-	auto type = e->type();
-	if (type == QEvent::TouchBegin
-		|| type == QEvent::TouchUpdate
-		|| type == QEvent::TouchEnd
-		|| type == QEvent::TouchCancel) {
-		auto event = static_cast<QTouchEvent*>(e);
-		if (event->device()->type() == base::TouchDevice::TouchScreen) {
-			touchEvent(event);
-		}
-	}
-	return Parent::eventHook(e);
-}
-
-void MaskedInputField::touchEvent(QTouchEvent *e) {
-	switch (e->type()) {
-	case QEvent::TouchBegin: {
-		if (_touchPress || e->touchPoints().isEmpty()) {
-			return;
-		}
-		_touchTimer.start(QApplication::startDragTime());
-		_touchPress = true;
-		_touchMove = _touchRightButton = _mousePressedInTouch = false;
-		_touchStart = e->touchPoints().cbegin()->screenPos().toPoint();
-	} break;
-
-	case QEvent::TouchUpdate: {
-		if (!e->touchPoints().isEmpty()) {
-			touchUpdate(e->touchPoints().cbegin()->screenPos().toPoint());
-		}
-	} break;
-
-	case QEvent::TouchEnd: {
-		touchFinish();
-	} break;
-
-	case QEvent::TouchCancel: {
-		_touchPress = false;
-		_touchTimer.stop();
-	} break;
-	}
-}
-
-void MaskedInputField::touchUpdate(QPoint globalPosition) {
-	if (_touchPress
-		&& !_touchMove
-		&& ((globalPosition - _touchStart).manhattanLength()
-			>= QApplication::startDragDistance())) {
-		_touchMove = true;
-	}
-}
-
-void MaskedInputField::touchFinish() {
-	if (!_touchPress) {
-		return;
-	}
-	const auto weak = MakeWeak(this);
-	if (!_touchMove && window()) {
-		QPoint mapped(mapFromGlobal(_touchStart));
-
-		if (_touchRightButton) {
-			QContextMenuEvent contextEvent(
-				QContextMenuEvent::Mouse,
-				mapped,
-				_touchStart);
-			contextMenuEvent(&contextEvent);
-		} else {
-			QGuiApplication::inputMethod()->show();
-		}
-	}
-	if (weak) {
-		_touchTimer.stop();
-		_touchPress
-			= _touchMove
-			= _touchRightButton
-			= _mousePressedInTouch = false;
-	}
 }
 
 void MaskedInputField::paintEvent(QPaintEvent *e) {
@@ -304,28 +217,6 @@ void MaskedInputField::paintEvent(QPaintEvent *e) {
 
 	paintAdditionalPlaceholder(p);
 	QLineEdit::paintEvent(e);
-}
-
-void MaskedInputField::mousePressEvent(QMouseEvent *e) {
-	if (_touchPress && e->button() == Qt::LeftButton) {
-		_mousePressedInTouch = true;
-		_touchStart = e->globalPos();
-	}
-	return QLineEdit::mousePressEvent(e);
-}
-
-void MaskedInputField::mouseReleaseEvent(QMouseEvent *e) {
-	if (_mousePressedInTouch) {
-		touchFinish();
-	}
-	return QLineEdit::mouseReleaseEvent(e);
-}
-
-void MaskedInputField::mouseMoveEvent(QMouseEvent *e) {
-	if (_mousePressedInTouch) {
-		touchUpdate(e->globalPos());
-	}
-	return QLineEdit::mouseMoveEvent(e);
 }
 
 QString MaskedInputField::getDisplayedText() const {

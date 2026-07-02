@@ -15,7 +15,7 @@
 #include "ui/layers/show.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/animation_value.h"
-#include "ui/text/text_entity.h"
+#include "ui/text/text_variant.h"
 #include "ui/rp_widget.h"
 
 enum class RectPart;
@@ -67,9 +67,13 @@ public:
 	virtual void setLayerType(bool layerType) = 0;
 	virtual void setStyle(const style::Box &st) = 0;
 	virtual const style::Box &style() = 0;
-	virtual void setTitle(rpl::producer<TextWithEntities> title) = 0;
+	virtual void setTitle(
+		rpl::producer<TextWithEntities> title,
+		Text::MarkedContext context = {}) = 0;
 	virtual void setAdditionalTitle(rpl::producer<QString> additional) = 0;
 	virtual void setCloseByOutsideClick(bool close) = 0;
+	[[nodiscard]] virtual rpl::producer<int> layerHeightMaxValue() = 0;
+	[[nodiscard]] virtual rpl::producer<int> contentHeightMaxValue() = 0;
 
 	virtual void setCustomCornersFilling(RectParts corners) = 0;
 	virtual void clearButtons() = 0;
@@ -94,11 +98,11 @@ public:
 	virtual void triggerButton(int index) = 0;
 
 	template <typename BoxType>
-	QPointer<BoxType> show(
+	base::weak_qptr<BoxType> show(
 			object_ptr<BoxType> content,
 			LayerOptions options = LayerOption::KeepOther,
 			anim::type animated = anim::type::normal) {
-		auto result = QPointer<BoxType>(content.data());
+		auto result = base::weak_qptr<BoxType>(content.data());
 		showBox(std::move(content), options, animated);
 		return result;
 	}
@@ -114,6 +118,10 @@ public:
 		setAttribute(Qt::WA_OpaquePaintEvent);
 	}
 
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::Dialog;
+	}
+
 	bool isBoxShown() const {
 		return getDelegate()->isBoxShown();
 	}
@@ -124,15 +132,15 @@ public:
 		getDelegate()->triggerButton(index);
 	}
 
-	void setTitle(rpl::producer<QString> title);
-	void setTitle(rpl::producer<TextWithEntities> title) {
-		getDelegate()->setTitle(std::move(title));
-	}
+	void setTitle(v::text::data title, Text::MarkedContext context = {});
 	void setAdditionalTitle(rpl::producer<QString> additional) {
 		getDelegate()->setAdditionalTitle(std::move(additional));
 	}
 	void setCloseByEscape(bool close) {
 		_closeByEscape = close;
+	}
+	[[nodiscard]] bool closeByEscape() const {
+		return _closeByEscape;
 	}
 	void setCloseByOutsideClick(bool close) {
 		getDelegate()->setCloseByOutsideClick(close);
@@ -141,6 +149,12 @@ public:
 	void scrollToWidget(not_null<QWidget*> widget);
 
 	virtual void showFinished() {
+	}
+	[[nodiscard]] virtual crl::time layerAnimationDuration() const {
+		return _layerAnimationDuration;
+	}
+	void setLayerAnimationDuration(crl::time duration) {
+		_layerAnimationDuration = duration;
 	}
 	void setCustomCornersFilling(RectParts corners) {
 		getDelegate()->setCustomCornersFilling(corners);
@@ -306,11 +320,11 @@ protected:
 private:
 	void finishPrepare();
 	void finishScrollCreate();
-	void setInner(object_ptr<TWidget> inner, const style::ScrollArea &st);
+	void setInner(object_ptr<RpWidget> inner, const style::ScrollArea &st);
 	void updateScrollAreaGeometry();
 	void updateInnerVisibleTopBottom();
 	void updateShadowsVisibility(anim::type animated = anim::type::normal);
-	object_ptr<TWidget> doTakeInnerWidget();
+	object_ptr<RpWidget> doTakeInnerWidget();
 
 	BoxContentDelegate *_delegate = nullptr;
 
@@ -330,6 +344,8 @@ private:
 
 	rpl::event_stream<> _boxClosingStream;
 
+	crl::time _layerAnimationDuration = 0;
+
 };
 
 class BoxPointer {
@@ -339,6 +355,8 @@ public:
 	BoxPointer(BoxPointer &&other) : _value(base::take(other._value)) {
 	}
 	BoxPointer(BoxContent *value) : _value(value) {
+	}
+	BoxPointer(base::weak_qptr<BoxContent> value) : _value(value) {
 	}
 	BoxPointer &operator=(const BoxPointer &other) {
 		if (_value != other._value) {
@@ -361,12 +379,19 @@ public:
 		}
 		return *this;
 	}
+	BoxPointer &operator=(base::weak_qptr<BoxContent> other) {
+		if (_value != other) {
+			destroy();
+			_value = other;
+		}
+		return *this;
+	}
 	~BoxPointer() {
 		destroy();
 	}
 
 	BoxContent *get() const {
-		return _value.data();
+		return _value.get();
 	}
 	operator BoxContent*() const {
 		return get();
@@ -385,7 +410,7 @@ private:
 		}
 	}
 
-	QPointer<BoxContent> _value;
+	base::weak_qptr<BoxContent> _value;
 
 };
 

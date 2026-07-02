@@ -10,12 +10,16 @@
 #include "ui/painter.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/buttons.h"
+#include "ui/wrap/padding_wrap.h"
+#include "ui/qt_object_factory.h"
 #include "base/invoke_queued.h"
 #include "styles/style_widgets.h"
 
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
+#include <qpa/qplatformwindow_p.h>
 
 namespace Ui {
 
@@ -83,6 +87,7 @@ void Tooltip::popup(const QPoint &m, const QString &text, const style::Tooltip *
 	_point = m;
 	_st = st;
 	_text = Text::String(_st->textStyle, text, kPlainTextOptions, _st->widthMax);
+	accessibilityNameChanged();
 
 	_useTransparency = Platform::TranslucentWindowsSupported();
 	setAttribute(Qt::WA_OpaquePaintEvent, !_useTransparency);
@@ -110,9 +115,24 @@ void Tooltip::popup(const QPoint &m, const QString &text, const style::Tooltip *
 		p.setX(m.x() - (s.width() / 2));
 	}
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 11, 0) && defined QT_FEATURE_wayland && QT_CONFIG(wayland)
+	using namespace QNativeInterface::Private;
+	create();
+	if (const auto native
+			= windowHandle()->nativeInterface<QWaylandWindow>()) {
+		native->setParentControlGeometry(
+			QRect(
+				QPoint(m.x() + _st->shift.x(), m.y() - _st->skip),
+				QSize(-_st->shift.x() * 2, _st->shift.y() + _st->skip)));
+		// even though Qt has tooltip type, our tooltip behaves like a menu
+		// (bottom left origin, no flip_x)
+		native->setExtendedWindowType(QWaylandWindow::Menu);
+	}
+#endif // Qt >= 6.11.0 && wayland
+
 	const auto screen = QGuiApplication::screenAt(m);
 	if (screen) {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) && !defined(Q_OS_MAC)
 		setScreen(screen);
 #else // Qt >= 6.0.0
 		createWinId();
@@ -205,7 +225,7 @@ ImportantTooltip::ImportantTooltip(
 	hide();
 
 	_content->widthValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		resizeToContent();
 	}, lifetime());
 }
@@ -282,9 +302,6 @@ void ImportantTooltip::countApproachSide(RectParts preferSide) {
 }
 
 void ImportantTooltip::toggleAnimated(bool visible) {
-	if (_visible == isHidden()) {
-		setVisible(_visible);
-	}
 	if (_visible != visible) {
 		updateGeometry();
 		_visible = visible;
@@ -296,6 +313,8 @@ void ImportantTooltip::toggleAnimated(bool visible) {
 		}
 		hideChildren();
 		_visibleAnimation.start([this] { animationCallback(); }, _visible ? 0. : 1., _visible ? 1. : 0., _st.duration, anim::easeOutCirc);
+	} else if (visible && isHidden()) {
+		show();
 	}
 }
 
@@ -433,7 +452,7 @@ void ImportantTooltip::paintEvent(QPaintEvent *e) {
 		int maxWidth,
 		Fn<int(int width)> heightForWidth) {
 	Expects(minWidth >= 0);
-	Expects(maxWidth > minWidth);
+	Expects(maxWidth >= minWidth);
 
 	const auto desired = heightForWidth(maxWidth);
 	while (maxWidth - minWidth > 1) {
@@ -452,7 +471,8 @@ object_ptr<FlatLabel> MakeNiceTooltipLabel(
 		rpl::producer<TextWithEntities> &&text,
 		int maxWidth,
 		const style::FlatLabel &st,
-		const style::PopupMenu &stMenu) {
+		const style::PopupMenu &stMenu,
+		const Text::MarkedContext &context) {
 	Expects(st.minWidth > 0);
 	Expects(st.minWidth < maxWidth);
 
@@ -460,9 +480,10 @@ object_ptr<FlatLabel> MakeNiceTooltipLabel(
 		parent,
 		rpl::duplicate(text),
 		st,
-		stMenu);
+		stMenu,
+		context);
 	const auto raw = result.data();
-	std::move(text) | rpl::start_with_next([=, &st] {
+	std::move(text) | rpl::on_next([=, &st] {
 		raw->resizeToWidth(qMin(maxWidth, raw->textMaxWidth()));
 		const auto desired = raw->textMaxWidth();
 		if (desired <= maxWidth) {
@@ -480,6 +501,80 @@ object_ptr<FlatLabel> MakeNiceTooltipLabel(
 		raw->resizeToWidth(niceWidth);
 	}, raw->lifetime());
 	return result;
+}
+
+object_ptr<RpWidget> MakeTooltipWithClose(
+		not_null<QWidget*> parent,
+		rpl::producer<TextWithEntities> text,
+		int maxWidth,
+		const style::FlatLabel &labelSt,
+		const style::IconButton &closeSt,
+		const style::margins &padding,
+		Fn<void()> hide) {
+	const auto size = closeSt.width;
+	auto result = object_ptr<PaddingWrap<FlatLabel>>(
+		parent,
+		MakeNiceTooltipLabel(
+			parent,
+			std::move(text),
+			maxWidth,
+			labelSt),
+		(padding + QMargins(0, 0, size - padding.right(), 0)));
+	const auto button = CreateChild<IconButton>(
+		result.data(),
+		closeSt);
+	result->sizeValue(
+	) | rpl::on_next([=](QSize size) {
+		button->resize(button->width(), size.height());
+		button->moveToRight(0, 0, size.width());
+	}, button->lifetime());
+	button->setClickedCallback(std::move(hide));
+	return result;
+}
+
+namespace {
+
+class TooltipShower final : public AbstractTooltipShower {
+public:
+	TooltipShower(not_null<RpWidget*> widget, Fn<QString()> text)
+	: _widget(widget), _text(std::move(text)) {
+	}
+
+	QString tooltipText() const override {
+		return _text ? _text() : QString();
+	}
+
+	QPoint tooltipPos() const override {
+		return QCursor::pos();
+	}
+
+	bool tooltipWindowActive() const override {
+		return _widget->window() && _widget->window()->isActiveWindow();
+	}
+
+private:
+	not_null<RpWidget*> _widget;
+	Fn<QString()> _text;
+
+};
+
+} // namespace
+
+void InstallTooltip(
+		not_null<RpWidget*> widget,
+		Fn<QString()> text,
+		const style::Tooltip *st) {
+	const auto shower = widget->lifetime().make_state<TooltipShower>(
+		widget,
+		std::move(text));
+
+	widget->events() | rpl::on_next([=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::Enter) {
+			Tooltip::Show(1000, shower);
+		} else if (e->type() == QEvent::Leave) {
+			Tooltip::Hide();
+		}
+	}, widget->lifetime());
 }
 
 } // namespace Ui

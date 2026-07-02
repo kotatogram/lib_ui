@@ -8,13 +8,13 @@
 
 #include "base/invoke_queued.h"
 #include "ui/text/text_entity.h"
+#include "ui/text/text_extended_data.h"
 #include "ui/effects/animation_value.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/box_content_divider.h"
 #include "ui/basic_click_handlers.h" // UrlClickHandler
 #include "ui/inactive_press.h"
 #include "ui/painter.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/integration.h"
 #include "ui/ui_utility.h"
 #include "base/qt/qt_common_adapters.h"
@@ -25,6 +25,7 @@
 #include <QtGui/QClipboard>
 #include <QtGui/QDrag>
 #include <QtGui/QtEvents>
+#include <QtGui/QWindow>
 #include <QtCore/QMimeData>
 
 namespace Ui {
@@ -169,6 +170,7 @@ void LabelSimple::setText(const QString &value, bool *outTextChanged) {
 		if (outTextChanged) *outTextChanged = false;
 		return;
 	}
+	accessibilityNameChanged();
 
 	_fullText = value;
 	_fullTextWidth = _st.font->width(_fullText);
@@ -204,7 +206,8 @@ FlatLabel::FlatLabel(
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
-, _stMenu(stMenu) {
+, _stMenu(stMenu)
+, _touchSelectTimer([=] { touchSelect(); }) {
 	init();
 }
 
@@ -216,7 +219,8 @@ FlatLabel::FlatLabel(
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
-, _stMenu(stMenu) {
+, _stMenu(stMenu)
+, _touchSelectTimer([=] { touchSelect(); }) {
 	setText(text);
 	init();
 }
@@ -229,11 +233,12 @@ FlatLabel::FlatLabel(
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
-, _stMenu(stMenu) {
+, _stMenu(stMenu)
+, _touchSelectTimer([=] { touchSelect(); }) {
 	textUpdated();
 	std::move(
 		text
-	) | rpl::start_with_next([this](const QString &value) {
+	) | rpl::on_next([this](const QString &value) {
 		setText(value);
 	}, lifetime());
 	init();
@@ -244,7 +249,7 @@ FlatLabel::FlatLabel(
 	rpl::producer<TextWithEntities> &&text,
 	const style::FlatLabel &st,
 	const style::PopupMenu &stMenu,
-	const Fn<std::any(Fn<void()>)> &makeContext)
+	const Text::MarkedContext &context)
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
@@ -253,10 +258,8 @@ FlatLabel::FlatLabel(
 	textUpdated();
 	std::move(
 		text
-	) | rpl::start_with_next([=](const TextWithEntities &value) {
-		setMarkedText(
-			value,
-			makeContext ? makeContext([=] { update(); }) : std::any());
+	) | rpl::on_next([=](const TextWithEntities &value) {
+		setMarkedText(value, context);
 	}, lifetime());
 	init();
 }
@@ -266,12 +269,23 @@ void FlatLabel::init() {
 }
 
 void FlatLabel::textUpdated() {
+	accessibilityNameChanged();
+	if (_skipBlockWidth > 0 && _skipBlockHeight > 0) {
+		_text.updateSkipBlock(_skipBlockWidth, _skipBlockHeight);
+	}
 	refreshSize();
 	setMouseTracking(_selectable || _text.hasLinks());
+	setAttribute(Qt::WA_AcceptTouchEvents, _selectable);
 	if (_text.hasSpoilers()) {
-		_text.setSpoilerLinkFilter([weak = Ui::MakeWeak(this)](
+		_text.setSpoilerLinkFilter([weak = base::make_weak(this)](
 				const ClickContext &context) {
 			return (context.button == Qt::LeftButton) && weak;
+		});
+	}
+	if (_text.hasCollapsedBlockquots()) {
+		_text.setBlockquoteExpandCallback([this](int, bool) {
+			refreshSize();
+			update();
 		});
 	}
 	update();
@@ -284,7 +298,8 @@ void FlatLabel::setText(const QString &text) {
 
 void FlatLabel::setMarkedText(
 		const TextWithEntities &textWithEntities,
-		const std::any &context) {
+		Text::MarkedContext context) {
+	context.repaint = [=] { update(); };
 	_text.setMarkedText(
 		_st.style,
 		textWithEntities,
@@ -298,7 +313,9 @@ void FlatLabel::setSelectable(bool selectable) {
 		_selection = { 0, 0 };
 		_savedSelection = { 0, 0 };
 		_selectable = selectable;
+		cancelTouchInProgress();
 		setMouseTracking(_selectable || _text.hasLinks());
+		setAttribute(Qt::WA_AcceptTouchEvents, _selectable);
 	}
 }
 
@@ -314,13 +331,38 @@ void FlatLabel::setBreakEverywhere(bool breakEverywhere) {
 	_breakEverywhere = breakEverywhere;
 }
 
+void FlatLabel::setElisionMiddle(bool elisionMiddle) {
+	if (_elisionMiddle != elisionMiddle) {
+		_elisionMiddle = elisionMiddle;
+		update();
+	}
+}
+
 void FlatLabel::setTryMakeSimilarLines(bool tryMakeSimilarLines) {
 	_tryMakeSimilarLines = tryMakeSimilarLines;
 }
 
+void FlatLabel::setSkipBlock(int width, int height) {
+	if (_skipBlockWidth == width && _skipBlockHeight == height) {
+		return;
+	}
+	_skipBlockWidth = width;
+	_skipBlockHeight = height;
+	if (width > 0 && height > 0) {
+		_text.updateSkipBlock(width, height);
+	} else {
+		_text.removeSkipBlock();
+	}
+	refreshSize();
+}
+
+void FlatLabel::setColors(std::span<Text::SpecialColor> colors) {
+	_colors = colors;
+	update();
+}
+
 int FlatLabel::resizeGetHeight(int newWidth) {
-	_allowedWidth = newWidth;
-	_textWidth = countTextWidth();
+	_textWidth = countTextWidth(newWidth);
 	return countTextHeight(_textWidth);
 }
 
@@ -328,23 +370,17 @@ int FlatLabel::textMaxWidth() const {
 	return _text.maxWidth();
 }
 
-int FlatLabel::naturalWidth() const {
-	return (_st.align == style::al_top) ? -1 : textMaxWidth();
-}
-
 QMargins FlatLabel::getMargins() const {
 	return _st.margin;
 }
 
-int FlatLabel::countTextWidth() const {
-	const auto available = _allowedWidth
-		? _allowedWidth
-		: (_st.minWidth ? _st.minWidth : _text.maxWidth());
-	if (_allowedWidth > 0
-		&& _allowedWidth < _text.maxWidth()
+int FlatLabel::countTextWidth(int newWidth) const {
+	const auto available = newWidth;
+	if (newWidth > 0
+		&& newWidth < _text.maxWidth()
 		&& _tryMakeSimilarLines) {
-		auto large = _allowedWidth;
-		auto small = _allowedWidth / 2;
+		auto large = newWidth;
+		auto small = std::max(newWidth / 2, _st.minWidth);
 		const auto largeHeight = _text.countHeight(large, _breakEverywhere);
 		while (large - small > 1) {
 			const auto middle = (large + small) / 2;
@@ -367,11 +403,26 @@ int FlatLabel::countTextHeight(int textWidth) {
 }
 
 void FlatLabel::refreshSize() {
-	int textWidth = countTextWidth();
-	int textHeight = countTextHeight(textWidth);
-	int fullWidth = _st.margin.left() + textWidth + _st.margin.right();
-	int fullHeight = _st.margin.top() + textHeight + _st.margin.bottom();
-	resize(fullWidth, fullHeight);
+	setNaturalWidth(textMaxWidth());
+	resizeToWidth(widthNoMargins(), true);
+}
+
+void FlatLabel::setPreCache(Fn<not_null<Text::QuotePaintCache*>()> make) {
+	_preCacheCallback = std::move(make);
+	update();
+}
+
+void FlatLabel::setBlockquoteCache(
+		Fn<not_null<Text::QuotePaintCache*>()> make) {
+	_blockquoteCacheCallback = std::move(make);
+	update();
+}
+
+bool FlatLabel::allowTextSelectionByHandler(
+		const ClickHandlerPtr &handler) const {
+	return _selectable
+		&& (dynamic_cast<Text::BlockquoteClickHandler*>(handler.get())
+			|| dynamic_cast<Text::PreClickHandler*>(handler.get()));
 }
 
 void FlatLabel::setLink(uint16 index, const ClickHandlerPtr &lnk) {
@@ -449,9 +500,11 @@ Text::StateResult FlatLabel::dragActionStart(const QPoint &p, Qt::MouseButton bu
 		MarkInactivePress(window(), false);
 	}
 
-	if (ClickHandler::getPressed()) {
-		_dragStartPosition = mapFromGlobal(_lastMousePos);
-		_dragAction = PrepareDrag;
+	if (const auto pressed = ClickHandler::getPressed()) {
+		if (!allowTextSelectionByHandler(pressed)) {
+			_dragStartPosition = mapFromGlobal(_lastMousePos);
+			_dragAction = PrepareDrag;
+		}
 	}
 	if (!_selectable || _dragAction != NoDrag) {
 		return state;
@@ -496,9 +549,10 @@ Text::StateResult FlatLabel::dragActionFinish(const QPoint &p, Qt::MouseButton b
 	auto state = dragActionUpdate();
 
 	auto activated = ClickHandler::unpressed();
-	if (_dragAction == Dragging) {
+	if (_dragAction == Dragging
+		|| (_dragAction == Selecting && !_selection.empty())) {
 		activated = nullptr;
-	} else if (_dragAction == PrepareDrag) {
+	} else if (_dragAction == PrepareDrag && button != Qt::RightButton) {
 		_selection = { 0, 0 };
 		_savedSelection = { 0, 0 };
 		update();
@@ -606,25 +660,60 @@ void FlatLabel::contextMenuEvent(QContextMenuEvent *e) {
 	showContextMenu(e, ContextMenuReason::FromEvent);
 }
 
-bool FlatLabel::eventHook(QEvent *e) {
-	if (e->type() == QEvent::TouchBegin || e->type() == QEvent::TouchUpdate || e->type() == QEvent::TouchEnd || e->type() == QEvent::TouchCancel) {
-		QTouchEvent *ev = static_cast<QTouchEvent*>(e);
-		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
-			touchEvent(ev);
-			return true;
+QTouchEvent *FlatLabel::checkTouchEvent(QEvent *e) {
+	const auto type = e->type();
+	if (type == QEvent::TouchBegin
+		|| type == QEvent::TouchUpdate
+		|| type == QEvent::TouchEnd
+		|| type == QEvent::TouchCancel) {
+		const auto touch = static_cast<QTouchEvent*>(e);
+		if (_selectable
+			&& touch->device()->type() == base::TouchDevice::TouchScreen) {
+			return touch;
 		}
+	}
+	return nullptr;
+}
+
+bool FlatLabel::eventHook(QEvent *e) {
+	if (const auto touch = checkTouchEvent(e)) {
+		const auto result = handleTouchEvent(touch);
+		if (result) {
+			e->accept();
+		} else {
+			e->ignore();
+		}
+		return result;
 	}
 	return RpWidget::eventHook(e);
 }
 
-void FlatLabel::touchEvent(QTouchEvent *e) {
-	if (e->type() == QEvent::TouchCancel) { // cancel
-		if (!_touchInProgress) return;
-		_touchInProgress = false;
-		_touchSelectTimer.cancel();
-		_touchSelect = false;
-		_dragAction = NoDrag;
+void FlatLabel::startTouchInProgress() {
+	if (_touchInProgress) {
 		return;
+	} else if (const auto w = window()->windowHandle()) {
+		_touchInProgress = true;
+		_touchSelectTimer.callOnce(QApplication::startDragTime());
+		_touchSelect = false;
+		_touchStart = _touchPrevPos = _touchPos;
+		w->installEventFilter(this);
+	}
+}
+
+void FlatLabel::cancelTouchInProgress() {
+	_touchInProgress = false;
+	_touchSelectTimer.cancel();
+	_touchSelect = false;
+	_dragAction = NoDrag;
+	if (const auto w = window()->windowHandle()) {
+		w->removeEventFilter(this);
+	}
+}
+
+bool FlatLabel::handleTouchEvent(QTouchEvent *e) {
+	if (e->type() == QEvent::TouchCancel) {
+		cancelTouchInProgress();
+		return false;
 	}
 
 	if (!e->touchPoints().isEmpty()) {
@@ -635,30 +724,33 @@ void FlatLabel::touchEvent(QTouchEvent *e) {
 	switch (e->type()) {
 	case QEvent::TouchBegin: {
 		if (_contextMenu) {
-			e->accept();
-			return; // ignore mouse press, that was hiding context menu
+			return true;
+		} else if (_touchInProgress || e->touchPoints().isEmpty()) {
+			return false;
 		}
-		if (_touchInProgress) return;
-		if (e->touchPoints().isEmpty()) return;
-
-		_touchInProgress = true;
-		_touchSelectTimer.callOnce(QApplication::startDragTime());
-		_touchSelect = false;
-		_touchStart = _touchPrevPos = _touchPos;
+		startTouchInProgress();
 	} break;
 
 	case QEvent::TouchUpdate: {
-		if (!_touchInProgress) return;
-		if (_touchSelect) {
+		if (!_touchInProgress) {
+			return false;
+		} else if (_touchSelect) {
 			_lastMousePos = _touchPos;
 			dragActionUpdate();
+			return true;
+		} else if ((_touchPos - _touchStart).manhattanLength()
+			>= QApplication::startDragDistance()) {
+			cancelTouchInProgress();
+			return false;
 		}
 	} break;
 
 	case QEvent::TouchEnd: {
-		if (!_touchInProgress) return;
+		if (!_touchInProgress) {
+			return false;
+		}
 		_touchInProgress = false;
-		auto weak = MakeWeak(this);
+		auto weak = base::make_weak(this);
 		if (_touchSelect) {
 			dragActionFinish(_touchPos, Qt::RightButton);
 			QContextMenuEvent contextMenu(QContextMenuEvent::Mouse, mapFromGlobal(_touchPos), _touchPos);
@@ -668,11 +760,22 @@ void FlatLabel::touchEvent(QTouchEvent *e) {
 			dragActionFinish(_touchPos, Qt::LeftButton);
 		}
 		if (weak) {
-			_touchSelectTimer.cancel();
-			_touchSelect = false;
+			cancelTouchInProgress();
 		}
+		return true;
 	} break;
 	}
+	return false;
+}
+
+bool FlatLabel::eventFilter(QObject *receiver, QEvent *e) {
+	if (const auto touch = checkTouchEvent(e)) {
+		if (handleTouchEvent(touch)) {
+			e->accept();
+			return true;
+		}
+	}
+	return QObject::eventFilter(receiver, e);
 }
 
 void FlatLabel::showContextMenu(QContextMenuEvent *e, ContextMenuReason reason) {
@@ -817,6 +920,15 @@ CrossFadeAnimation::Data FlatLabel::crossFadeData(
 	return result;
 }
 
+std::vector<int> FlatLabel::countLineWidths() const {
+	const auto textWidth = _textWidth
+		? _textWidth
+		: (width() - _st.margin.left() - _st.margin.right());
+	return _text.countLineWidths(textWidth, {
+		.breakEverywhere = _breakEverywhere,
+	});
+}
+
 std::unique_ptr<CrossFadeAnimation> FlatLabel::CrossFade(
 		not_null<FlatLabel*> from,
 		not_null<FlatLabel*> to,
@@ -911,10 +1023,22 @@ Text::StateResult FlatLabel::getTextState(const QPoint &m) const {
 	if (_selectable) {
 		request.flags |= Text::StateRequest::Flag::LookupSymbol;
 	}
-	int textWidth = width() - _st.margin.left() - _st.margin.right();
+	const auto textWidth = _textWidth
+		? _textWidth
+		: (width() - _st.margin.left() - _st.margin.right());
+	const auto useWidth = !(_st.align & Qt::AlignLeft)
+		? textWidth
+		: std::min(textWidth, _text.maxWidth());
+	const auto textLeft = _textWidth
+		? ((_st.align & Qt::AlignLeft)
+			? _st.margin.left()
+			: (_st.align & Qt::AlignHCenter)
+			? ((width() - _textWidth) / 2)
+			: (width() - _st.margin.right() - _textWidth))
+		: _st.margin.left();
 
 	Text::StateResult state;
-	bool heightExceeded = _st.maxHeight && (_st.maxHeight < _fullTextHeight || textWidth < _text.maxWidth());
+	bool heightExceeded = _st.maxHeight && (_st.maxHeight < _fullTextHeight || useWidth < _text.maxWidth());
 	bool renderElided = _breakEverywhere || heightExceeded;
 	if (renderElided) {
 		auto lineHeight = qMax(_st.style.lineHeight, _st.style.font->height);
@@ -923,9 +1047,9 @@ Text::StateResult FlatLabel::getTextState(const QPoint &m) const {
 		if (_breakEverywhere) {
 			request.flags |= Text::StateRequest::Flag::BreakEverywhere;
 		}
-		state = _text.getStateElided(m - QPoint(_st.margin.left(), _st.margin.top()), textWidth, request);
+		state = _text.getStateElided(m - QPoint(textLeft, _st.margin.top()), useWidth, request);
 	} else {
-		state = _text.getState(m - QPoint(_st.margin.left(), _st.margin.top()), textWidth, request);
+		state = _text.getState(m - QPoint(textLeft, _st.margin.top()), useWidth, request);
 	}
 
 	return state;
@@ -942,6 +1066,10 @@ void FlatLabel::setTextColorOverride(std::optional<QColor> color) {
 }
 
 void FlatLabel::paintEvent(QPaintEvent *e) {
+	if (_opacity == 0.) {
+		return;
+	}
+
 	Painter p(this);
 	p.setOpacity(_opacity);
 	if (_textColorOverride) {
@@ -974,6 +1102,7 @@ void FlatLabel::paintEvent(QPaintEvent *e) {
 		: _st.maxHeight
 		? qMax(_st.maxHeight, lineHeight)
 		: height();
+	const auto elisionLines = (renderElided && _elisionMiddle) ? 1 : 0;
 	const auto paused = _animationsPausedCallback
 		? _animationsPausedCallback()
 		: WhichAnimationsPaused::None;
@@ -983,6 +1112,11 @@ void FlatLabel::paintEvent(QPaintEvent *e) {
 		.align = _st.align,
 		.clip = e->rect(),
 		.palette = &_st.palette,
+		.pre = _preCacheCallback ? _preCacheCallback().get() : nullptr,
+		.blockquote = (_blockquoteCacheCallback
+			? _blockquoteCacheCallback().get()
+			: nullptr),
+		.colors = _colors,
 		.spoiler = Text::DefaultSpoilerCache(),
 		.now = crl::now(),
 		.pausedEmoji = (paused == WhichAnimationsPaused::CustomEmoji
@@ -991,7 +1125,9 @@ void FlatLabel::paintEvent(QPaintEvent *e) {
 			|| paused == WhichAnimationsPaused::All),
 		.selection = selection,
 		.elisionHeight = elisionHeight,
+		.elisionLines = elisionLines,
 		.elisionBreakEverywhere = renderElided && _breakEverywhere,
+		.elisionMiddle = (elisionLines == 1),
 	});
 }
 
@@ -999,19 +1135,20 @@ DividerLabel::DividerLabel(
 	QWidget *parent,
 	object_ptr<RpWidget> &&child,
 	const style::margins &padding,
+	const style::DividerBar &st,
 	RectParts parts)
 : PaddingWrap(parent, std::move(child), padding)
-, _background(this, st::boxDividerHeight, st::boxDividerBg, parts) {
-}
-
-int DividerLabel::naturalWidth() const {
-	return -1;
+, _background(this, st::boxDividerHeight, st, parts) {
+	setNaturalWidth(-1);
 }
 
 void DividerLabel::resizeEvent(QResizeEvent *e) {
 	_background->lower();
 	_background->setGeometry(rect());
 	return PaddingWrap::resizeEvent(e);
+}
+
+void DividerLabel::wrappedNaturalWidthUpdated(int width) {
 }
 
 } // namespace Ui

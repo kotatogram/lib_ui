@@ -13,6 +13,7 @@
 #include "styles/style_widgets.h"
 
 #include <QtGui/QtEvents>
+#include <QtWidgets/QApplication>
 
 namespace Ui::Menu {
 
@@ -47,12 +48,12 @@ void Menu::init() {
 	}
 
 	paintRequest(
-	) | rpl::start_with_next([=](const QRect &clip) {
+	) | rpl::on_next([=](const QRect &clip) {
 		QPainter(this).fillRect(clip, _st.itemBg);
 	}, lifetime());
 
 	positionValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		handleMouseMove(QCursor::pos());
 	}, lifetime());
 }
@@ -106,7 +107,6 @@ not_null<QAction*> Menu::insertAction(
 	const auto action = raw->action();
 	_actions.insert(begin(_actions) + position, action);
 
-	raw->setParent(this);
 	raw->show();
 	raw->setIndex(position);
 	for (auto i = position, to = int(_actionWidgets.size()); i != to; ++i) {
@@ -117,7 +117,7 @@ not_null<QAction*> Menu::insertAction(
 		std::move(widget));
 
 	raw->selects(
-	) | rpl::start_with_next([=](const CallbackData &data) {
+	) | rpl::on_next([=](const CallbackData &data) {
 		if (!data.selected) {
 			if (!findSelectedAction()
 				&& data.index < _actionWidgets.size()
@@ -139,7 +139,7 @@ not_null<QAction*> Menu::insertAction(
 	}, raw->lifetime());
 
 	raw->clicks(
-	) | rpl::start_with_next([=](const CallbackData &data) {
+	) | rpl::on_next([=](const CallbackData &data) {
 		if (_triggeredCallback) {
 			_triggeredCallback(data);
 		}
@@ -154,39 +154,15 @@ not_null<QAction*> Menu::insertAction(
 		}
 	});
 
-	const auto recountWidth = [=] {
-		return _forceWidth
-			? _forceWidth
-			: std::clamp(
-				(_actionWidgets.empty()
-					? 0
-					: (*ranges::max_element(
-						_actionWidgets,
-						std::less<>(),
-						&ItemBase::minWidth))->minWidth()),
-				_st.widthMin,
-				_st.widthMax);
-	};
-	const auto recountHeight = [=] {
-		auto result = 0;
-		for (const auto &widget : _actionWidgets) {
-			if (widget->y() != result) {
-				widget->move(0, result);
-			}
-			result += widget->height();
-		}
-		return result;
-	};
-
 	raw->minWidthValue(
 	) | rpl::skip(1) | rpl::filter([=] {
 		return !_forceWidth;
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		resizeFromInner(recountWidth(), height());
 	}, raw->lifetime());
 
 	raw->heightValue(
-	) | rpl::skip(1) | rpl::start_with_next([=] {
+	) | rpl::skip(1) | rpl::on_next([=] {
 		resizeFromInner(width(), recountHeight());
 	}, raw->lifetime());
 
@@ -195,6 +171,42 @@ not_null<QAction*> Menu::insertAction(
 	updateSelected(QCursor::pos());
 
 	return action;
+}
+
+int Menu::recountWidth() const {
+	return _forceWidth
+		? _forceWidth
+		: std::clamp(
+			(_actionWidgets.empty()
+				? 0
+				: (*ranges::max_element(
+					_actionWidgets,
+					std::less<>(),
+					&ItemBase::minWidth))->minWidth()),
+			_st.widthMin,
+			_st.widthMax);
+}
+
+int Menu::recountHeight() const {
+	auto result = 0;
+	for (const auto &widget : _actionWidgets) {
+		if (widget->y() != result) {
+			widget->move(0, result);
+		}
+		result += widget->height();
+	}
+	return result;
+}
+
+void Menu::removeAction(int position) {
+	Expects(position >= 0 && position < actions().size());
+
+	_actionWidgets.erase(begin(_actionWidgets) + position);
+	if (_actions[position]->parent() == this) {
+		delete _actions[position];
+	}
+	_actions.erase(begin(_actions) + position);
+	resizeFromInner(width(), recountHeight());
 }
 
 not_null<QAction*> Menu::addSeparator(const style::MenuSeparator *st) {
@@ -253,6 +265,19 @@ void Menu::resizeFromInner(int w, int h) {
 	}
 }
 
+QRect Menu::visibleRect() const {
+	return (_visibleBottom > _visibleTop)
+		? QRect(0, _visibleTop, width(), _visibleBottom - _visibleTop)
+		: rect();
+}
+
+void Menu::visibleTopBottomUpdated(
+		int visibleTop,
+		int visibleBottom) {
+	_visibleTop = visibleTop;
+	_visibleBottom = visibleBottom;
+}
+
 rpl::producer<> Menu::resizesFromInner() const {
 	return _resizesFromInner.events();
 }
@@ -262,14 +287,33 @@ rpl::producer<ScrollToRequest> Menu::scrollToRequests() const {
 }
 
 void Menu::setShowSource(TriggeredSource source) {
+	_motions = 0;
+	_mousePopupPosition = QCursor::pos();
 	const auto mouseSelection = (source == TriggeredSource::Mouse);
-	setSelected(
-		(mouseSelection || _actions.empty()) ? -1 : 0,
-		mouseSelection);
+	setSelected([&] {
+		if (mouseSelection) {
+			return -1;
+		}
+		for (auto i = 0, count = int(_actions.size()); i != count; ++i) {
+			const auto widget = _actionWidgets[i].get();
+			if (widget->isEnabled() && !widget->action()->isSeparator()) {
+				return i;
+			}
+		}
+		return -1;
+	}(), mouseSelection);
 }
+
 
 const std::vector<not_null<QAction*>> &Menu::actions() const {
 	return _actions;
+}
+
+ItemBase *Menu::itemForAction(not_null<QAction*> action) const {
+	const auto i = ranges::find(_actions, action);
+	return (i != end(_actions))
+		? _actionWidgets[std::distance(begin(_actions), i)].get()
+		: nullptr;
 }
 
 void Menu::setForceWidth(int forceWidth) {
@@ -381,13 +425,27 @@ void Menu::setSelected(int selected, bool isMouseSelection) {
 	}
 }
 
+bool Menu::hasMouseMoved(const QPoint &globalPosition) const {
+	// determines if the mouse has moved (ie its initial position has
+	// changed by more than QApplication::startDragDistance()
+	// or if there were at least 6 mouse motions)
+	return _motions > 6
+		|| QApplication::startDragDistance()
+			< (_mousePopupPosition - globalPosition).manhattanLength();
+}
+
+void Menu::mouseMoved() {
+	_motions++;
+}
+
 void Menu::mouseMoveEvent(QMouseEvent *e) {
 	handleMouseMove(e->globalPos());
 }
 
 void Menu::handleMouseMove(QPoint globalPosition) {
 	const auto margins = style::margins(0, _st.skip, 0, _st.skip);
-	const auto inner = rect().marginsRemoved(margins);
+	const auto visible = visibleRect();
+	const auto inner = rect().marginsRemoved(margins).intersected(visible);
 	const auto localPosition = mapFromGlobal(globalPosition);
 	if (inner.contains(localPosition)) {
 		updateSelected(globalPosition);
@@ -410,7 +468,8 @@ void Menu::mouseReleaseEvent(QMouseEvent *e) {
 void Menu::handleMousePress(QPoint globalPosition) {
 	handleMouseMove(globalPosition);
 	const auto margins = style::margins(0, _st.skip, 0, _st.skip);
-	const auto inner = rect().marginsRemoved(margins);
+	const auto visible = visibleRect();
+	const auto inner = rect().marginsRemoved(margins).intersected(visible);
 	const auto localPosition = mapFromGlobal(globalPosition);
 	const auto pressed = (inner.contains(localPosition)
 		&& _lastSelectedByMouse)
@@ -426,10 +485,26 @@ void Menu::handleMousePress(QPoint globalPosition) {
 }
 
 void Menu::handleMouseRelease(QPoint globalPosition) {
-	if (!rect().contains(mapFromGlobal(globalPosition))
-			&& _mouseReleaseDelegate) {
+	if (_pressedOutside) {
+		_pressedOutside = false;
+		updateSelected(globalPosition);
+		if (const auto selected = findSelectedAction()) {
+			selected->setClicked(TriggeredSource::Mouse);
+		}
+		return;
+	}
+	const auto margins = style::margins(0, _st.skip, 0, _st.skip);
+	const auto visible = visibleRect();
+	const auto inner = rect().marginsRemoved(margins).intersected(visible);
+	if (!inner.contains(mapFromGlobal(globalPosition))
+		&& _mouseReleaseDelegate) {
 		_mouseReleaseDelegate(globalPosition);
 	}
+}
+
+void Menu::handlePressedOutside(QPoint globalPosition) {
+	_pressedOutside = true;
+	updateSelected(globalPosition);
 }
 
 } // namespace Ui::Menu

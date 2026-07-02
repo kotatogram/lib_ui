@@ -13,9 +13,29 @@
 
 #include <crl/crl_time.h>
 
+#include <any>
+#include <memory>
+#include <optional>
+#include <utility>
+
 class QPainter;
 
+namespace style {
+struct TextStyle;
+} // namespace style
+
+namespace Ui::Emoji {
+
+[[nodiscard]] int GetCustomSizeNormal();
+[[nodiscard]] int GetCustomSkipNormal();
+[[nodiscard]] int GetCustomSizeLarge();
+[[nodiscard]] int GetCustomSkipLarge();
+
+} // namespace Ui::Emoji
+
 namespace Ui::Text {
+
+struct MarkedContext;
 
 [[nodiscard]] int AdjustCustomEmojiSize(int emojiSize);
 
@@ -36,12 +56,39 @@ struct CustomEmojiPaintContext {
 	} internal;
 };
 
+struct CustomEmojiVerticalMetrics {
+	int ascent = 0;
+	int descent = 0;
+
+	[[nodiscard]] int height() const {
+		return ascent + descent;
+	}
+};
+
+struct CustomEmojiSemantics {
+	bool isEmoji = true;
+	bool isRealCustomEmoji = true;
+	bool exportEntity = true;
+	bool unloadPersistentAnimation = true;
+	bool allowCustomEmojiClick = true;
+};
+
 class CustomEmoji {
 public:
 	virtual ~CustomEmoji() = default;
 
 	[[nodiscard]] virtual int width() = 0;
 	[[nodiscard]] virtual QString entityData() = 0;
+	[[nodiscard]] virtual std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &) {
+		return std::nullopt;
+	}
+	[[nodiscard]] virtual QString replacementText() {
+		return QString();
+	}
+	[[nodiscard]] virtual CustomEmojiSemantics semantics() {
+		return {};
+	}
 
 	using Context = CustomEmojiPaintContext;
 	virtual void paint(QPainter &p, const Context &context) = 0;
@@ -51,16 +98,16 @@ public:
 
 };
 
-using CustomEmojiFactory = Fn<std::unique_ptr<CustomEmoji>(
-	QStringView,
-	Fn<void()>)>;
-
 class ShiftedEmoji final : public CustomEmoji {
 public:
 	ShiftedEmoji(std::unique_ptr<CustomEmoji> wrapped, QPoint shift);
 
 	int width() override;
 	QString entityData() override;
+	std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &st) override;
+	QString replacementText() override;
+	CustomEmojiSemantics semantics() override;
 	void paint(QPainter &p, const Context &context) override;
 	void unload() override;
 	bool ready() override;
@@ -78,6 +125,10 @@ public:
 
 	int width() override;
 	QString entityData() override;
+	std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &st) override;
+	QString replacementText() override;
+	CustomEmojiSemantics semantics() override;
 	void paint(QPainter &p, const Context &context) override;
 	void unload() override;
 	bool ready() override;
@@ -97,6 +148,10 @@ public:
 
 	int width() override;
 	QString entityData() override;
+	std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &st) override;
+	QString replacementText() override;
+	CustomEmojiSemantics semantics() override;
 	void paint(QPainter &p, const Context &context) override;
 	void unload() override;
 	bool ready() override;
@@ -110,5 +165,45 @@ private:
 	bool _stopOnLast = false;
 
 };
+
+template <typename Wrapper, typename ...Args>
+[[nodiscard]] std::unique_ptr<CustomEmoji> MakeWrappedEmoji(
+		std::unique_ptr<CustomEmoji> wrapped,
+		Args &&...args) {
+	return wrapped
+		? std::make_unique<Wrapper>(
+			std::move(wrapped),
+			std::forward<Args>(args)...)
+		: nullptr;
+}
+
+class PaletteDependentCustomEmoji final : public CustomEmoji {
+public:
+	PaletteDependentCustomEmoji(
+		Fn<QImage()> factory,
+		QString entity,
+		QMargins padding = {});
+
+	int width() override;
+	QString entityData() override;
+	void paint(QPainter &p, const Context &context) override;
+	void unload() override;
+	bool ready() override;
+	bool readyInDefaultState() override;
+
+private:
+	void validateFrame();
+
+	Fn<QImage()> _factory;
+	QString _entity;
+	QMargins _padding;
+	QImage _frame;
+	int _paletteVersion = 0;
+
+};
+
+[[nodiscard]] std::unique_ptr<CustomEmoji> MakeCustomEmoji(
+	QStringView data,
+	const MarkedContext &context);
 
 } // namespace Ui::Text

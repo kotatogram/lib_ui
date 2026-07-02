@@ -69,12 +69,6 @@ public:
 		}
 		return RpWidget::getMargins();
 	}
-	int naturalWidth() const override {
-		if (auto weak = wrapped()) {
-			return weak->naturalWidth();
-		}
-		return RpWidget::naturalWidth();
-	}
 
 	using WrapParentType = RpWidget;
 
@@ -97,6 +91,9 @@ protected:
 	virtual void wrappedSizeUpdated(QSize size) {
 		resize(size);
 	}
+	virtual void wrappedNaturalWidthUpdated(int naturalWidth) {
+		setNaturalWidth(naturalWidth);
+	}
 
 private:
 	object_ptr<Widget> _wrapped;
@@ -111,14 +108,18 @@ Wrap<Widget, RpWidget>::Wrap(
 , _wrapped(std::move(child)) {
 	if (_wrapped) {
 		_wrapped->sizeValue(
-		) | rpl::start_with_next([this](const QSize &value) {
+		) | rpl::on_next([this](const QSize &value) {
 			wrappedSizeUpdated(value);
+		}, lifetime());
+		_wrapped->naturalWidthValue(
+		) | rpl::on_next([this](int naturalWidth) {
+			wrappedNaturalWidthUpdated(naturalWidth);
 		}, lifetime());
 		_wrapped->setParent(this);
 		_wrapped->show();
 		_wrapped->move(0, 0);
 		_wrapped->alive(
-		) | rpl::start_with_done([this] {
+		) | rpl::on_done([this] {
 			_wrapped->setParent(nullptr);
 			_wrapped = nullptr;
 			delete this;

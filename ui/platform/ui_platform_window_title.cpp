@@ -7,7 +7,6 @@
 #include "ui/platform/ui_platform_window_title.h"
 
 #include "ui/platform/ui_platform_utility.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
 #include "ui/ui_utility.h"
@@ -16,6 +15,7 @@
 #include "styles/palette.h"
 #include "base/algorithm.h"
 #include "base/event_filter.h"
+#include "ui/integration.h"
 #include "base/platform/base_platform_info.h"
 
 #include <QtGui/QPainter>
@@ -41,14 +41,14 @@ void SetupSemiNativeSystemButtons(
 	window->systemButtonOver(
 	) | rpl::filter([=](HitTestResult button) {
 		return !filter || filter() || (button == HitTestResult::None);
-	}) | rpl::start_with_next([=](HitTestResult button) {
+	}) | rpl::on_next([=](HitTestResult button) {
 		controls->buttonOver(button);
 	}, lifetime);
 
 	window->systemButtonDown(
 	) | rpl::filter([=](HitTestResult button) {
 		return !filter || filter() || (button == HitTestResult::None);
-	}) | rpl::start_with_next([=](HitTestResult button) {
+	}) | rpl::on_next([=](HitTestResult button) {
 		controls->buttonDown(button);
 	}, lifetime);
 }
@@ -89,6 +89,7 @@ void IconTitleButtons::updateState(
 			? &st.minimizeIconActiveOver
 			: &st.minimize.iconOver;
 		_minimize->setIconOverride(minimize, minimizeOver);
+		_minimize->setAccessibleName(Ui::Integration::Instance().phraseMinimize());
 	}
 	if (_maximizeRestore) {
 		if (maximized) {
@@ -99,6 +100,7 @@ void IconTitleButtons::updateState(
 				? &st.restoreIconActiveOver
 				: &st.restoreIconOver;
 			_maximizeRestore->setIconOverride(restore, restoreOver);
+			_maximizeRestore->setAccessibleName(Ui::Integration::Instance().phraseRestore());
 		} else {
 			const auto maximize = active
 				? &st.maximizeIconActive
@@ -107,6 +109,7 @@ void IconTitleButtons::updateState(
 				? &st.maximizeIconActiveOver
 				: &st.maximize.iconOver;
 			_maximizeRestore->setIconOverride(maximize, maximizeOver);
+			_maximizeRestore->setAccessibleName(Ui::Integration::Instance().phraseMaximize());
 		}
 	}
 	if (_close) {
@@ -117,6 +120,7 @@ void IconTitleButtons::updateState(
 			? &st.closeIconActiveOver
 			: &st.close.iconOver;
 		_close->setIconOverride(close, closeOver);
+		_close->setAccessibleName(Ui::Integration::Instance().phraseButtonClose());
 	}
 }
 
@@ -137,6 +141,7 @@ TitleControls::TitleControls(
 	std::unique_ptr<AbstractTitleButtons> buttons,
 	Fn<void(bool maximized)> maximize)
 : _st(&st)
+, _layout(TitleControlsLayout::Instance())
 , _buttons(std::move(buttons))
 , _minimize(_buttons->create(parent, Control::Minimize, st))
 , _maximizeRestore(_buttons->create(parent, Control::Maximize, st))
@@ -147,7 +152,7 @@ TitleControls::TitleControls(
 	init(std::move(maximize));
 
 	_close->paintRequest(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto active = window()->isActiveWindow();
 		if (_activeState != active) {
 			_activeState = active;
@@ -163,6 +168,10 @@ void TitleControls::setStyle(const style::WindowTitle &st) {
 
 not_null<const style::WindowTitle*> TitleControls::st() const {
 	return _st;
+}
+
+TitleControlsLayout &TitleControls::layout() const {
+	return *_layout;
 }
 
 QRect TitleControls::geometry() const {
@@ -188,7 +197,7 @@ not_null<QWidget*> TitleControls::window() const {
 
 void TitleControls::init(Fn<void(bool maximized)> maximize) {
 	_minimize->setClickedCallback([=] {
-		const auto weak = MakeWeak(_minimize.data());
+		const auto weak = base::make_weak(_minimize.data());
 		window()->setWindowState(
 			window()->windowState() | Qt::WindowMinimized);
 		if (weak) {
@@ -197,7 +206,7 @@ void TitleControls::init(Fn<void(bool maximized)> maximize) {
 	});
 	_minimize->setPointerCursor(false);
 	_maximizeRestore->setClickedCallback([=] {
-		const auto weak = MakeWeak(_maximizeRestore.data());
+		const auto weak = base::make_weak(_maximizeRestore.data());
 		if (maximize) {
 			maximize(!_maximizedState);
 		} else {
@@ -211,7 +220,7 @@ void TitleControls::init(Fn<void(bool maximized)> maximize) {
 	});
 	_maximizeRestore->setPointerCursor(false);
 	_close->setClickedCallback([=] {
-		const auto weak = MakeWeak(_close.data());
+		const auto weak = base::make_weak(_close.data());
 		window()->close();
 		if (weak) {
 			_close->clearState();
@@ -221,8 +230,8 @@ void TitleControls::init(Fn<void(bool maximized)> maximize) {
 
 	rpl::combine(
 		parent()->widthValue(),
-		TitleControlsLayoutValue()
-	) | rpl::start_with_next([=] {
+		_layout->value()
+	) | rpl::on_next([=] {
 		updateControlsPosition();
 	}, _close->lifetime());
 
@@ -308,7 +317,7 @@ AbstractButton *TitleControls::controlWidget(Control control) const {
 }
 
 void TitleControls::updateControlsPosition() {
-	auto controlsLayout = TitleControlsLayout();
+	auto controlsLayout = _layout->current();
 	auto &controlsLeft = controlsLayout.left;
 	auto &controlsRight = controlsLayout.right;
 	ranges::reverse(controlsRight);
@@ -322,7 +331,7 @@ void TitleControls::updateControlsPosition() {
 			}
 			from.clear();
 		};
-		if (TitleControlsOnLeft(controlsLayout)) {
+		if (controlsLayout.onLeft()) {
 			moveFromTo(controlsRight, controlsLeft);
 		} else {
 			moveFromTo(controlsLeft, controlsRight);
@@ -409,34 +418,13 @@ void TitleControls::updateButtonsState() {
 	_buttons->updateState(_activeState, _maximizedState, *_st);
 }
 
-namespace internal {
-namespace {
-
-auto &CachedTitleControlsLayout() {
-	using Layout = TitleControls::Layout;
-	static rpl::variable<Layout> Result = TitleControlsLayout();
-	return Result;
-};
-
-} // namespace
-
-void NotifyTitleControlsLayoutChanged(
-		const std::optional<TitleControls::Layout> &layout) {
-	CachedTitleControlsLayout() = layout ? *layout : TitleControlsLayout();
-}
-
-} // namespace internal
-
-TitleControls::Layout TitleControlsLayout() {
-	return internal::CachedTitleControlsLayout().current();
-}
-
-rpl::producer<TitleControls::Layout> TitleControlsLayoutValue() {
-	return internal::CachedTitleControlsLayout().value();
-}
-
-rpl::producer<TitleControls::Layout> TitleControlsLayoutChanged() {
-	return internal::CachedTitleControlsLayout().changes();
+std::shared_ptr<TitleControlsLayout> TitleControlsLayout::Instance() {
+	static std::weak_ptr<TitleControlsLayout> Weak;
+	auto result = Weak.lock();
+	if (!result) {
+		Weak = result = Create();
+	}
+	return result;
 }
 
 DefaultTitleWidget::DefaultTitleWidget(not_null<RpWidget*> parent)
@@ -448,6 +436,10 @@ DefaultTitleWidget::DefaultTitleWidget(not_null<RpWidget*> parent)
 
 not_null<const style::WindowTitle*> DefaultTitleWidget::st() const {
 	return _controls.st();
+}
+
+TitleControlsLayout &DefaultTitleWidget::layout() const {
+	return _controls.layout();
 }
 
 QRect DefaultTitleWidget::controlsGeometry() const {
@@ -552,7 +544,7 @@ std::unique_ptr<SeparateTitleControls> SetupSeparateTitleControls(
 		window->body()->widthValue(),
 		window->additionalContentPaddingValue(),
 		controlsTop ? std::move(controlsTop) : rpl::single(0)
-	) | rpl::start_with_next([=](int width, int padding, int top) {
+	) | rpl::on_next([=](int width, int padding, int top) {
 		raw->wrap.setGeometry(
 			0,
 			top,
@@ -561,7 +553,7 @@ std::unique_ptr<SeparateTitleControls> SetupSeparateTitleControls(
 	}, lifetime);
 
 	window->hitTestRequests(
-	) | rpl::start_with_next([=](not_null<HitTestRequest*> request) {
+	) | rpl::on_next([=](not_null<HitTestRequest*> request) {
 		const auto controlsResult = raw->controls.hitTest(request->point);
 		if (controlsResult != HitTestResult::None) {
 			request->result = controlsResult;

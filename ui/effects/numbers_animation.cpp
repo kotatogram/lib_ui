@@ -48,10 +48,8 @@ void NumbersAnimation::animationCallback() {
 	if (_widthChangedCallback) {
 		_widthChangedCallback();
 	}
-	if (!_a_ready.animating()) {
-		if (!_delayedText.isEmpty()) {
-			setText(_delayedText, _delayedValue);
-		}
+	if (!_a_ready.animating() && !_delayedText.isEmpty()) {
+		setText(_delayedText, _delayedValue);
 	}
 }
 
@@ -136,6 +134,8 @@ void NumbersAnimation::paint(QPainter &p, int x, int y, int outerWidth) {
 	auto progress = anim::easeOutCirc(1., _a_ready.value(1.));
 	auto width = anim::interpolate(_fromWidth, _toWidth, progress);
 
+	p.setFont(_font);
+	const auto initial = p.opacity();
 	QString singleChar('0');
 	if (style::RightToLeft()) x = outerWidth - x - width;
 	x += width - _bothWidth;
@@ -152,24 +152,24 @@ void NumbersAnimation::paint(QPainter &p, int x, int y, int outerWidth) {
 			? _digitWidth
 			: digit.fromWidth;
 		if (from == to) {
-			p.setOpacity(1.);
+			p.setOpacity(initial);
 			singleChar[0] = from;
 			p.drawText(x + (toCharWidth - digit.fromWidth) / 2, y + _font->ascent, singleChar);
 		} else {
 			if (from.unicode()) {
-				p.setOpacity(1. - progress);
+				p.setOpacity(initial * (1. - progress));
 				singleChar[0] = from;
 				p.drawText(x + (fromCharWidth - digit.fromWidth) / 2, y + fromTop + _font->ascent, singleChar);
 			}
 			if (to.unicode()) {
-				p.setOpacity(progress);
+				p.setOpacity(initial * progress);
 				singleChar[0] = to;
 				p.drawText(x + (toCharWidth - digit.toWidth) / 2, y + toTop + _font->ascent, singleChar);
 			}
 		}
 		x += std::max(toCharWidth, fromCharWidth);
 	}
-	p.setOpacity(1.);
+	p.setOpacity(initial);
 }
 
 LabelWithNumbers::LabelWithNumbers(
@@ -186,6 +186,10 @@ LabelWithNumbers::LabelWithNumbers(
 , _beforeWidth(_st.style.font->width(_before))
 , _afterWidth(st.style.font->width(_after)) {
 	Expects((value.offset < 0) == (value.length == 0));
+
+	_numbers.setWidthChangedCallback([=] {
+		updateNaturalWidth();
+	});
 
 	const auto numbers = GetNumbers(value);
 	_numbers.setText(numbers, numbers.toInt());
@@ -225,6 +229,12 @@ void LabelWithNumbers::setValue(const StringWithNumbers &value) {
 		anim::easeOutCirc);
 
 	_afterWidth = _st.style.font->width(_after);
+
+	updateNaturalWidth();
+}
+
+void LabelWithNumbers::updateNaturalWidth() {
+	setNaturalWidth(_beforeWidth + _numbers.maxWidth() + _afterWidth);
 }
 
 void LabelWithNumbers::finishAnimating() {
