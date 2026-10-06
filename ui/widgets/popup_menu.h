@@ -13,6 +13,7 @@
 #include "ui/widgets/shadow.h"
 #include "ui/round_rect.h"
 #include "ui/rp_widget.h"
+#include "ui/ui_touch_forward.h"
 #include "base/object_ptr.h"
 #include "base/unique_qptr.h"
 
@@ -155,6 +156,8 @@ protected:
 	bool eventFilter(QObject *o, QEvent *e) override;
 
 private:
+	struct SubmenuAim;
+
 	void paintBg(QPainter &p);
 	void hideFast();
 	void setOrigin(PanelAnimation::Origin origin);
@@ -204,6 +207,12 @@ private:
 		not_null<PopupMenu*> submenu,
 		int actionTop,
 		TriggeredSource source);
+	[[nodiscard]] QAction *activeSubmenuAction() const;
+	[[nodiscard]] not_null<SubmenuAim*> submenuAim();
+	[[nodiscard]] bool insideSubmenuAim(QPoint position) const;
+	void watchMouseMoves();
+	void handleMouseMoved(QPoint globalPosition);
+	void clearSubmenuAim();
 	bool prepareGeometryFor(
 		const QPoint &p,
 		PopupMenu *parent,
@@ -233,6 +242,9 @@ private:
 
 	QPointer<PopupMenu> _activeSubmenu;
 
+	// Filled in only while a submenu of this menu is shown.
+	std::unique_ptr<SubmenuAim> _submenuAim;
+
 	std::optional<VerticalOrigin> _forcedVerticalOrigin;
 	PanelAnimation::Origin _origin = PanelAnimation::Origin::TopLeft;
 	std::optional<PanelAnimation::Origin> _forcedOrigin;
@@ -252,6 +264,7 @@ private:
 	bool _reactivateParent = true;
 	bool _grabbingForPanelAnimation = false;
 
+	TouchForward _touchForward;
 	int _touchBeginCounter = 0;
 	int _topShift = 0;
 	bool _clearLastSeparator = true;

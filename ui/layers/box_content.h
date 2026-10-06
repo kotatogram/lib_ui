@@ -257,13 +257,6 @@ protected:
 		getDelegate()->setLayerType(layerType);
 	}
 
-	void setTopShadowWithSkip(bool enabled) {
-		_topShadowWithSkip = enabled;
-	}
-	void setBottomShadowWithSkip(bool enabled) {
-		_bottomShadowWithSkip = enabled;
-	}
-
 	void setDimensions(
 			int newWidth,
 			int maxHeight,
@@ -331,8 +324,6 @@ private:
 	bool _preparing = false;
 	bool _noContentMargin = false;
 	bool _closeByEscape = true;
-	bool _topShadowWithSkip = false;
-	bool _bottomShadowWithSkip = false;
 	int _innerTopSkip = 0;
 	int _innerBottomSkip = 0;
 	object_ptr<ScrollArea> _scroll = { nullptr };

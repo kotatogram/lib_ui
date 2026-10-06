@@ -433,15 +433,18 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 	rpl::combine(
 		shownValue(),
 		_fullscreen.value()
-	) | rpl::filter([=](bool shown, bool) {
-		return shown;
-	}) | rpl::on_next([=](bool, bool fullscreen) {
+	) | rpl::on_next([=](bool shown, bool fullscreen) {
+		if (!shown) {
+			_exposed = false;
+			return;
+		}
 		if (_animationCache.isNull()) {
 			updateControlsVisibility(fullscreen);
 		}
 		Platform::SetWindowMargins(
 			this,
 			_useTransparency ? computePadding() : QMargins());
+		Platform::SetForeignTransientParent(this, _transientParent);
 	}, lifetime());
 
 	Platform::FullScreenEvents(
@@ -1004,10 +1007,7 @@ void SeparatePanel::setAnchorData(
 	_anchorGeometry = std::move(geometry);
 	if (!SameForeignParent(_transientParent, transientParent)) {
 		_transientParent = std::move(transientParent);
-		_foreignTransientParentApplied = false;
-		if (!_transientParent && windowHandle()) {
-			Platform::ClearTransientParent(this);
-		}
+		Platform::SetForeignTransientParent(this, _transientParent);
 	}
 }
 
@@ -1019,16 +1019,6 @@ void SeparatePanel::showAndActivate() {
 			}
 		}
 		moveToAnchorGeometry();
-	}
-	if (_transientParent
-		&& (!_foreignTransientParentApplied
-			|| (_transientParent.type
-				== Platform::ForeignParent::Type::Wayland))) {
-		createWinId();
-		if (windowHandle()) {
-			Platform::SetForeignTransientParent(this, _transientParent);
-			_foreignTransientParentApplied = true;
-		}
 	}
 	toggleOpacityAnimation(true);
 	raise();
@@ -1458,7 +1448,18 @@ void SeparatePanel::initGeometry(QSize size) {
 		} else {
 			setFixedSize(rect.size());
 		}
-		Ui::SetGeometryAndScreen(this, rect);
+		if (!anchor && _transientParent) {
+			// Don't set the position, so that the WM/compositor itself
+			// places us relative to the transient parent (on X11 that
+			// requires not setting the position hint). WA_Moved is already
+			// set by RpWidget constructor's zero setGeometry call, so it
+			// must be cleared back, otherwise QWidgetPrivate::create
+			// passes the position to the QWindow.
+			resize(rect.size());
+			setAttribute(Qt::WA_Moved, false);
+		} else {
+			Ui::SetGeometryAndScreen(this, rect);
+		}
 		updateControlsGeometry();
 	}
 }
@@ -1495,6 +1496,10 @@ void SeparatePanel::updateControlsGeometry() {
 }
 
 void SeparatePanel::paintEvent(QPaintEvent *e) {
+	if (!_exposed && windowHandle() && windowHandle()->isExposed()) {
+		_exposed = true;
+		Platform::SetForeignTransientParent(this, _transientParent);
+	}
 	auto p = QPainter(this);
 	if (!_animationCache.isNull()) {
 		auto opacity = _opacityAnimation.value(_visible ? 1. : 0.);
@@ -1506,8 +1511,8 @@ void SeparatePanel::paintEvent(QPaintEvent *e) {
 
 			PainterHighQualityEnabler hq(p);
 			auto marginRatio = (1. - opacity) / 5;
-			auto marginWidth = qRound(width() * marginRatio);
-			auto marginHeight = qRound(height() * marginRatio);
+			auto marginWidth = int(base::SafeRound(width() * marginRatio));
+			auto marginHeight = int(base::SafeRound(height() * marginRatio));
 			p.drawPixmap(
 				rect().marginsRemoved(
 					QMargins(

@@ -14,6 +14,7 @@
 #endif // Q_OS_WIN && Qt < 6
 
 class QOpenGLContext;
+class QWidget;
 
 namespace Ui::GL {
 
@@ -31,15 +32,18 @@ struct Capabilities {
 struct RhiCapabilities {
 	bool supported = false;
 	bool compute = false;
+	bool vulkan = false;
 };
 
 extern const char kOptionUseQtRhi[];
+extern const char kOptionEnableVulkanRhi[];
 
 [[nodiscard]] Capabilities CheckCapabilities(QWidget *widget = nullptr);
 [[nodiscard]] Backend ChooseBackendDefault(Capabilities capabilities);
 
 [[nodiscard]] bool WidgetsRhiEnabled();
 [[nodiscard]] bool WidgetsRhiSupported();
+[[nodiscard]] bool WidgetsRhiVulkan();
 [[nodiscard]] RhiCapabilities CheckRhiCapabilities();
 
 void ForceDisable(bool disable);
@@ -47,6 +51,7 @@ void ForceDisable(bool disable);
 void DetectLastCheckCrash();
 [[nodiscard]] bool LastCrashCheckFailed();
 void CrashCheckFinish();
+void CrashCheckFirstFrame(not_null<QWidget*> window);
 
 #ifdef DESKTOP_APP_USE_ANGLE
 enum class ANGLE {

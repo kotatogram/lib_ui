@@ -24,6 +24,7 @@ public:
 
 	void initInWindow(not_null<RpWindow*> window) override;
 	not_null<RpWidget*> body() override;
+	RpWidget *titleWidget() override;
 	QMargins frameMargins() override;
 	int additionalContentPadding() const override;
 	rpl::producer<int> additionalContentPaddingValue() const override;
@@ -79,7 +80,7 @@ private:
 	rpl::event_stream<HitTestResult> _systemButtonDown;
 	std::optional<WindowShadow> _shadow;
 	rpl::variable<uint> _dpi;
-	QMargins _marginsDelta;
+	QMargins _marginsDelta, _rcWorkDelta;
 	HWND _handle = nullptr;
 	bool _updatingMargins = false;
 	bool _isFullScreen = false;

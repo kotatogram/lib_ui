@@ -17,6 +17,7 @@
 #include "ui/integration.h"
 #include "base/qt/qt_common_adapters.h"
 
+#include <QtCore/QByteArray>
 #include <QtCore/QStack>
 #include <QtCore/QMimeData>
 #include <QtGui/QGuiApplication>
@@ -1679,7 +1680,11 @@ void ParseEntities(TextWithEntities &result, int32 flags) {
 		auto mDomain = qthelp::RegExpDomain().match(result.text, matchOffset);
 		auto mExplicitDomain = qthelp::RegExpDomainExplicit().match(result.text, matchOffset);
 		auto mHashtag = withHashtags ? RegExpHashtag(true).match(result.text, matchOffset) : QRegularExpressionMatch();
-		auto mMention = withMentions ? RegExpMention().match(result.text, qMax(mentionSkip, matchOffset)) : QRegularExpressionMatch();
+		auto mMention = withMentions
+			? RegExpMention().match(
+				result.text,
+				std::max(mentionSkip, matchOffset))
+			: QRegularExpressionMatch();
 		auto mBotCommand = withBotCommands ? RegExpBotCommand().match(result.text, matchOffset) : QRegularExpressionMatch();
 
 		auto lnkType = EntityType::Url;
@@ -1724,7 +1729,9 @@ void ParseEntities(TextWithEntities &result, int32 flags) {
 					&& (start + mentionSkip)->isLowSurrogate()) {
 					++mentionSkip;
 				}
-				mMention = RegExpMention().match(result.text, qMax(mentionSkip, matchOffset));
+				mMention = RegExpMention().match(
+					result.text,
+					std::max(mentionSkip, matchOffset));
 				if (mMention.hasMatch()) {
 					mentionStart = mMention.capturedStart();
 					mentionEnd = mMention.capturedEnd();
@@ -2505,8 +2512,17 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 
 std::unique_ptr<QMimeData> MimeDataFromText(const TextForMimeData &text) {
 	const auto html = TextUtilities::TextForMimeDataToHtml(text);
+	auto tags = ConvertEntitiesToTextTags(text.rich.entities);
+	tags.reserve(tags.size() + text.tags.size());
+	for (const auto &tag : text.tags) {
+		tags.push_back({
+			.offset = tag.offset,
+			.length = tag.length,
+			.id = tag.id,
+		});
+	}
 	return MimeDataFromText(
-		{ text.rich.text, ConvertEntitiesToTextTags(text.rich.entities) },
+		{ text.rich.text, SimplifyTags(std::move(tags)) },
 		text.expanded,
 		html);
 }
@@ -2539,6 +2555,8 @@ TextForMimeData TextForMimeData::WithExpandedLinks(
 		auto from = 0;
 		for (const auto &entity : text.entities) {
 			if (entity.type() != EntityType::CustomUrl) {
+				continue;
+			} else if (!entity.validForText(text.text.size())) {
 				continue;
 			}
 			// This logic is duplicated in Ui::Text::String::toText.
@@ -2582,9 +2600,10 @@ int EntityInText::FirstMonospaceOffset(
 	auto &&monospace = ranges::make_subrange(
 		entities.begin(),
 		entities.end()
-	) | ranges::views::filter([](const EntityInText & entity) {
-		return (entity.type() == EntityType::Pre)
-			|| (entity.type() == EntityType::Code);
+	) | ranges::views::filter([=](const EntityInText &entity) {
+		return entity.validForText(textLength)
+			&& ((entity.type() == EntityType::Pre)
+				|| (entity.type() == EntityType::Code));
 	});
 	const auto i = ranges::max_element(
 		monospace,

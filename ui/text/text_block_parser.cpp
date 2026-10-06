@@ -13,7 +13,6 @@
 #include "styles/style_basic.h"
 
 #include <QtCore/QUrl>
-#include <private/qfixed_p.h>
 
 namespace Ui::Text {
 namespace {
@@ -576,7 +575,6 @@ void BlockParser::parseCurrentChar() {
 	const auto isNewLine = !inCustomEmoji && _multiline && IsNewline(_ch);
 	const auto replaceWithSpace = IsSpace(_ch)
 		&& (_ch != QChar::Nbsp)
-		&& (_ch != QChar(8203))
 		&& (!inCustomEmoji || _ch != QChar::ObjectReplacementCharacter);
 	const auto isDiacritic = IsDiacritic(_ch);
 	const auto skip = [&] {
@@ -678,8 +676,7 @@ void BlockParser::parseEmojiFromCurrent() {
 }
 
 bool BlockParser::isInvalidEntity(const EntityInText &entity) const {
-	const auto length = entity.length();
-	return (_start + entity.offset() + length > _end) || (length <= 0);
+	return !entity.validForText(_end - _start);
 }
 
 bool BlockParser::isLinkEntity(const EntityInText &entity) const {

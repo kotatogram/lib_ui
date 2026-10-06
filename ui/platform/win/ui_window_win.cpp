@@ -199,6 +199,10 @@ not_null<RpWidget*> WindowHelper::body() {
 	return _body;
 }
 
+RpWidget *WindowHelper::titleWidget() {
+	return _title.get();
+}
+
 QMargins WindowHelper::frameMargins() {
 	return _title->isHidden()
 		? BasicWindowHelper::nativeFrameMargins()
@@ -868,6 +872,7 @@ void WindowHelper::updateMargins() {
 	auto margins = nativeResize()
 		? QMargins(0, r.top, 0, 0)
 		: QMargins(r.left, r.top, -r.right, -r.bottom);
+	_rcWorkDelta = QMargins();
 	if (style & WS_MAXIMIZE) {
 		RECT w, m;
 		GetWindowRect(_handle , &w);
@@ -881,16 +886,15 @@ void WindowHelper::updateMargins() {
 			m = mi.rcWork;
 		}
 
-		_marginsDelta = QMargins(
+		_rcWorkDelta = QMargins(
 			w.left - m.left,
 			w.top - m.top,
 			m.right - w.right,
 			m.bottom - w.bottom);
 
-		margins.setLeft(margins.left() - _marginsDelta.left());
-		margins.setRight(margins.right() - _marginsDelta.right());
-		margins.setBottom(margins.bottom() - _marginsDelta.bottom());
-		margins.setTop(margins.top() - _marginsDelta.top());
+		const auto normal = margins;
+		margins = QMargins(r.left, r.top, -r.right, -r.bottom) - _rcWorkDelta;
+		_marginsDelta = normal - margins;
 	} else if (!_marginsDelta.isNull()) {
 		RECT w;
 		GetWindowRect(_handle, &w);
@@ -941,8 +945,8 @@ void WindowHelper::fixMaximizedWindow() {
 				0,
 				0,
 				0,
-				m.right - m.left - _marginsDelta.left() - _marginsDelta.right(),
-				m.bottom - m.top - _marginsDelta.top() - _marginsDelta.bottom(),
+				m.right - m.left - _rcWorkDelta.left() - _rcWorkDelta.right(),
+				m.bottom - m.top - _rcWorkDelta.top() - _rcWorkDelta.bottom(),
 				SWP_NOMOVE | SWP_NOSENDCHANGING | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREPOSITION);
 		}
 	}
